@@ -1,0 +1,33 @@
+.wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 100px;
+}
+
+.track {
+  flex: 1;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.high     { background: #10b981; }
+.medium   { background: #f59e0b; }
+.low      { background: #f97316; }
+.critical { background: #ef4444; }
+
+.label {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  width: 2.8rem;
+  text-align: right;
+  flex-shrink: 0;
+}

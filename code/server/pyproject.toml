@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Add the server root to sys.path so imports like `from core.models import …` work
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["core", "api", "comms", "algorithms", "localization", "logging_system"]
+omit = ["tests/*"]

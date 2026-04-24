@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Radar Tracker Dashboard - Three.js</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/three/styles.css">
+</head>
+<body>
+  <main class="dashboard">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Localization 4Cam</p>
+        <h1>Radar Tracker Control Surface</h1>
+        <p class="hero-copy">Interactive Three.js scene for orbit, pan, and zoom.</p>
+      </div>
+      <div class="status-panel">
+        <span id="statusDot" class="status-dot status-waiting"></span>
+        <div>
+          <p class="status-label">System Status</p>
+          <strong id="statusText">Connecting</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="layout-grid">
+      <div class="panel feeds-panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Live Input</p>
+            <h2>Camera Feeds</h2>
+          </div>
+          <p id="messageText" class="panel-message">Waiting for backend</p>
+        </div>
+
+        <div class="camera-grid">
+          <article class="camera-card">
+            <header><span>Camera 1</span><span id="cam-1-badge" class="badge">Idle</span></header>
+            <img id="cam-1-feed" alt="Camera 1 live feed">
+          </article>
+          <article class="camera-card">
+            <header><span>Camera 2</span><span id="cam-2-badge" class="badge">Idle</span></header>
+            <img id="cam-2-feed" alt="Camera 2 live feed">
+          </article>
+          <article class="camera-card">
+            <header><span>Camera 3</span><span id="cam-3-badge" class="badge">Idle</span></header>
+            <img id="cam-3-feed" alt="Camera 3 live feed">
+          </article>
+          <article class="camera-card">
+            <header><span>Camera 4</span><span id="cam-4-badge" class="badge">Idle</span></header>
+            <img id="cam-4-feed" alt="Camera 4 live feed">
+          </article>
+        </div>
+      </div>
+
+      <div class="panel tracker-panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Spatial View</p>
+            <h2>3D Grid Tracker</h2>
+          </div>
+          <div class="coords">
+            <span>X <strong id="coord-x">--</strong></span>
+            <span>Y <strong id="coord-y">--</strong></span>
+            <span>Z <strong id="coord-z">--</strong></span>
+          </div>
+        </div>
+
+        <div id="trackerScene" class="scene-host"></div>
+        <p class="hint">Drag to rotate. Right-drag to pan. Mouse wheel to zoom.</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="/three/app.js"></script>
+</body>
+</html>

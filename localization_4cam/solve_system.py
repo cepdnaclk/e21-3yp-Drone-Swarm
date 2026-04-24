@@ -4,13 +4,14 @@ import json
 from scipy import linalg
 
 # Settings
-NUM_CAMERAS = 4
+CAMERA_INDICES = [1, 2, 3, 4]  # Explicitly using your camera IDs
+NUM_CAMERAS = len(CAMERA_INDICES)
 SCALE_DISTANCE = 0.15 # 15cm distance between first two floor points
 
 def load_intrinsics():
     matrices, dists = [], []
-    for i in range(NUM_CAMERAS):
-        with open(f"camera_{i}_params.json", "r") as f:
+    for cam_id in CAMERA_INDICES:
+        with open(f"camera_{cam_id}_params.json", "r") as f:
             data = json.load(f)
             matrices.append(np.array(data["intrinsic_matrix"]))
             dists.append(np.array(data["distortion_coef"]))
@@ -37,7 +38,8 @@ def main():
     camera_poses = [{"R": np.eye(3), "t": np.zeros((3, 1))}]
     
     for i in range(NUM_CAMERAS - 1):
-        print(f"Solving pose for Camera {i} -> {i+1}...")
+        # Print statements updated to show your actual 1, 2, 3, 4 names
+        print(f"Solving pose for Camera {CAMERA_INDICES[i]} -> {CAMERA_INDICES[i+1]}...")
         pts1 = wand_pts[:, i, :]
         pts2 = wand_pts[:, i+1, :]
 
@@ -50,7 +52,7 @@ def main():
         E, mask = cv.findEssentialMat(p1_valid, p2_valid, K[i], method=cv.RANSAC, prob=0.999, threshold=1.0)
         _, R, t, mask = cv.recoverPose(E, p1_valid, p2_valid, K[i])
 
-        # Chain the transformations to global space (Cam 0)
+        # Chain the transformations to global space (Cam 0 internally, which is your Cam 1)
         R_global = R @ camera_poses[-1]["R"]
         t_global = camera_poses[-1]["t"] + (camera_poses[-1]["R"] @ t)
         
@@ -60,7 +62,7 @@ def main():
     print("Triangulating floor points...")
     floor_3d = []
     for f_pt in floor_pts:
-        # Triangulate using Cam 0 and Cam 1 as reference
+        # Triangulate using your first two cameras as reference
         if not np.isnan(f_pt[0,0]) and not np.isnan(f_pt[1,0]):
             pt3d = triangulate_point(K[0], camera_poses[0]["R"], camera_poses[0]["t"], 
                                      K[1], camera_poses[1]["R"], camera_poses[1]["t"], 

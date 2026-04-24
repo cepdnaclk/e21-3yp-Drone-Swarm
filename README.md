@@ -6,6 +6,32 @@ This work is developed as part of the PERA Swarm initiative, which aims to advan
 
 By combining UWB-based localization, real drone-to-drone communication, and structured analytics such as packet loss and near-collision detection, the testbed aims to bridge the gap between simulation-based studies and real-world swarm experimentation.
 
+## Automated Merge Checks
+
+This repository now includes a GitHub Actions workflow at `.github/workflows/merge-checks.yml`.
+It runs automatically on pull requests and on pushes to `main` or `master`.
+
+Current checks:
+
+- Python syntax validation for all `.py` files in the repository
+- JSON validation for `docs/data/index.json`
+- Basic structure validation for project metadata in `docs/data/index.json`
+
+To make these checks block merges, enable branch protection in GitHub:
+
+1. Open the repository on GitHub.
+2. Go to `Settings` -> `Branches`.
+3. Add a branch protection rule for your main branch.
+4. Enable `Require status checks to pass before merging`.
+5. Select the `Merge Checks` workflow job as a required check.
+
+You can run the same checks locally with:
+
+```bash
+python -m pip install -r requirements-dev.txt
+pytest -q
+```
+
 
 ```
 {

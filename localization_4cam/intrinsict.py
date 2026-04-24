@@ -2,11 +2,12 @@ import cv2 as cv
 import numpy as np
 import json
 import os
+
 #repeat this for each camera by changing CAMERA_ID to 1, 2, and 3 respectively
 # --- SETTINGS ---
-CAMERA_ID = 0  # Change this to 1, 2, and 3 for the other cameras
+CAMERA_ID = 4 # Change this to 1, 2, and 3 for the other cameras
 CHECKERBOARD = (9, 6) # Number of internal corners (width, height)
-SQUARE_SIZE = 0.025 # Size of a square in meters (e.g., 25mm = 0.025)
+SQUARE_SIZE = 0.023 # Size of a square in meters (e.g., 25mm = 0.025)
 
 def calibrate_camera(camera_id):
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -17,7 +18,13 @@ def calibrate_camera(camera_id):
     objpoints = []
     imgpoints = []
 
-    cap = cv.VideoCapture(camera_id)
+    # Added CAP_DSHOW to prevent Windows indexing errors
+    cap = cv.VideoCapture(camera_id, cv.CAP_DSHOW)
+    
+    # --- DECREASE RESOLUTION HERE ---
+    cap.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+
     print(f"--- Camera {camera_id} Calibration ---")
     print("Press 's' to save a frame (need ~20). Press 'q' to calculate and quit.")
 

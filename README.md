@@ -6,7 +6,6 @@ This work is developed as part of the PERA Swarm initiative, which aims to advan
 
 By combining UWB-based localization, real drone-to-drone communication, and structured analytics such as packet loss and near-collision detection, the testbed aims to bridge the gap between simulation-based studies and real-world swarm experimentation.
 
-
 ```
 {
   "title": "Progammable Drone Swarm",

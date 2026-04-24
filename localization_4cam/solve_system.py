@@ -9,7 +9,7 @@ from itertools import combinations
 CAMERA_INDICES = [1, 2, 3, 4]  
 NUM_CAMERAS = len(CAMERA_INDICES)
 
-# Your manual sensor-to-sensor measurement
+# Your manual tape-measure distance between Camera 1 and Camera 2
 CAM_1_TO_2_DISTANCE = 2.0  
 
 BASE_DIR = r"C:\Users\Admin\Desktop\AI-ML Courses\e21-3yp-Drone-Swarm-\localization_4cam"
@@ -98,35 +98,50 @@ def main():
     if len(floor_3d) > 0:
         floor_3d *= CAM_1_TO_2_DISTANCE
     
-    # 5. Floor Leveling (Your linalg.lstsq logic fixed for OpenCV Y-Axis)
+    # 5. Floor Leveling (The "Stand it Upright" Fix)
     if len(floor_3d) >= 3:
-        print("Calculating World Matrix using lstsq logic...")
+        print("Calculating World Matrix (Correcting Axes & Leveling)...")
         
-        # OpenCV uses Y for vertical depth. We fit Y as a function of X and Z.
-        tmp_A = np.c_[floor_3d[:, 0], floor_3d[:, 2], np.ones(len(floor_3d))]
-        tmp_b = floor_3d[:, 1]
+        raw_floor = np.copy(floor_3d)
+
+        # STEP A: Swap the Axes! (OpenCV Y-Down -> Real World Z-Up)
+        axis_swap = np.array([
+            [1,  0,  0],
+            [0,  0,  1],  
+            [0, -1,  0]   
+        ], dtype=np.float64)
         
+        upright_floor = (axis_swap @ floor_3d.T).T
+        
+        # STEP B: Fit a normal flat plane (Z = aX + bY + c)
+        tmp_A = np.c_[upright_floor[:, 0:2], np.ones(len(upright_floor))]
+        tmp_b = upright_floor[:, 2]
         fit, _, _, _ = linalg.lstsq(tmp_A, tmp_b)
         
-        plane_normal = np.array([[fit[0]], [-1.0], [fit[1]]])
+        # STEP C: Find the tilt and rotate it perfectly flat
+        plane_normal = np.array([-fit[0], -fit[1], 1.0])
         plane_normal = plane_normal / linalg.norm(plane_normal)
+        up_normal = np.array([0.0, 0.0, 1.0])
         
-        up_normal = np.array([[0],[0],[1]], dtype=np.float32)
-
-        G = np.array([
-            [np.dot(plane_normal.T,up_normal)[0][0], -linalg.norm(np.cross(plane_normal.T[0],up_normal.T[0])), 0],
-            [linalg.norm(np.cross(plane_normal.T[0],up_normal.T[0])), np.dot(plane_normal.T,up_normal)[0][0], 0],
-            [0, 0, 1]
-        ])
-        F = np.array([plane_normal.T[0], ((up_normal-np.dot(plane_normal.T,up_normal)[0][0]*plane_normal)/linalg.norm((up_normal-np.dot(plane_normal.T,up_normal)[0][0]*plane_normal))).T[0], np.cross(up_normal.T[0],plane_normal.T[0])]).T
+        v = np.cross(plane_normal, up_normal)
+        c = np.dot(plane_normal, up_normal)
+        s = linalg.norm(v)
         
-        R_world = F @ G @ linalg.inv(F)
+        if s < 1e-6:
+            R_level = np.eye(3)
+        else:
+            kmat = np.array([
+                [0, -v[2], v[1]],
+                [v[2], 0, -v[0]],
+                [-v[1], v[0], 0]
+            ])
+            R_level = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))
+            
+        # Combine rotations
+        R_world = R_level @ axis_swap
         
-        # Retaining your Y-axis flip
-        R_world = R_world @ [[1,0,0],[0,-1,0],[0,0,1]] 
-
-        # Force the Z-axis of the rotated floor points to exactly 0.00m
-        rotated_floor = (R_world @ floor_3d.T).T
+        # STEP D: Drop the floor exactly to 0.00m
+        rotated_floor = (R_world @ raw_floor.T).T
         z_offset = np.mean(rotated_floor[:, 2])
         t_world = np.array([[0], [0], [-z_offset]])
         

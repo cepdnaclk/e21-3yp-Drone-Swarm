@@ -910,6 +910,58 @@
       .hero-ctas { flex-direction: column; align-items: center; }
     }
 
+    /* ── Team photo ─────────────────────────────────────────── */
+    .team-photo {
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(59, 130, 246, 0.45);
+      box-shadow: 0 0 22px rgba(59, 130, 246, 0.22);
+    }
+
+    /* ── Dataflow diagram ────────────────────────────────────── */
+    .dataflow-diagram {
+      width: 100%;
+      height: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      display: block;
+      background: #fff;
+    }
+    .dataflow-wrap {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    /* ── GitHub nav btn ──────────────────────────────────────── */
+    .nav-github {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      padding: 6px 12px;
+      transition: all var(--transition);
+      text-decoration: none;
+      margin-left: 6px;
+      flex-shrink: 0;
+    }
+    .nav-github:hover {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: var(--blue);
+      color: var(--text);
+      text-decoration: none;
+    }
+    @media (max-width: 768px) {
+      .nav-github { display: none; }
+    }
+
     /* ── Reduced motion ──────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -1007,10 +1059,10 @@
     <p class="hero-sub">Low-budget platform for drone swarm research and education</p>
 
     <div class="hero-stats">
-      <div class="stat-item"><div class="stat-val">4+</div><div class="stat-lbl">Drones</div></div>
       <div class="stat-item"><div class="stat-val">Indoor</div><div class="stat-lbl">Localization</div></div>
       <div class="stat-item"><div class="stat-val">Real-Time</div><div class="stat-lbl">Control</div></div>
-      <div class="stat-item"><div class="stat-val">Open</div><div class="stat-lbl">Platform</div></div>
+      <div class="stat-item"><div class="stat-val">Custom</div><div class="stat-lbl">Algorithms</div></div>
+      <div class="stat-item"><div class="stat-val">Live</div><div class="stat-lbl">Telemetry</div></div>
     </div>
 
     <div class="hero-ctas">
@@ -1171,7 +1223,7 @@
         <h3>Localization Layer</h3>
         <ul>
           <li>Top-mounted overhead cameras</li>
-          <li>IR markers / LEDs on drones</li>
+          <li>Colored LEDs on drones</li>
           <li>Computes real-time positions</li>
         </ul>
       </div>
@@ -1228,85 +1280,11 @@
     <div class="text-center">
       <span class="sec-label">Communication</span>
       <h2 class="sec-title">Data &amp; Control Flow</h2>
-      <p class="sec-sub">How information moves between drones, cameras, and the server.</p>
+      <p class="sec-sub">End-to-end flow between the web frontend, Python backend, ESP-NOW radio bridge, and the drones.</p>
     </div>
     <div class="sec-divider"></div>
-    <div class="flow-grid">
-      <div class="card reveal" style="--i:0">
-        <h3><span class="flow-dir uplink">Uplink</span> Drone → Server</h3>
-        <div class="flow-items">
-          <div class="flow-item">
-            <div>
-              <span class="flow-item-label">Battery Level</span>
-              <span class="flow-item-desc">Remaining charge percentage</span>
-            </div>
-          </div>
-          <div class="flow-item">
-            <div>
-              <span class="flow-item-label">Flight Mode</span>
-              <span class="flow-item-desc">Current operating state of the drone</span>
-            </div>
-          </div>
-          <div class="flow-item">
-            <div>
-              <span class="flow-item-label">Wi-Fi Signal / RSSI</span>
-              <span class="flow-item-desc">Link quality to server</span>
-            </div>
-          </div>
-          <div class="flow-item">
-            <div>
-              <span class="flow-item-label">Error Flags</span>
-              <span class="flow-item-desc">Hardware or software faults</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="card reveal" style="--i:1">
-        <h3><span class="flow-dir downlink">Downlink</span> Server → Drone</h3>
-        <div class="flow-items">
-          <div class="flow-item">
-            <div>
-              <code>SETPOINT_POSITION(x, y, z)</code>
-              <span class="flow-item-desc">Target position in 3D space</span>
-            </div>
-          </div>
-          <div class="flow-item">
-            <div>
-              <code>SETPOINT_VELOCITY(vx, vy, vz)</code>
-              <span class="flow-item-desc">Target velocity vector</span>
-            </div>
-          </div>
-          <div class="flow-item">
-            <div>
-              <code>TAKEOFF / LAND / HOLD</code>
-              <span class="flow-item-desc">Critical flight-phase commands</span>
-            </div>
-          </div>
-          <div class="flow-item">
-            <div>
-              <code>KILL / SET_LIMITS</code>
-              <span class="flow-item-desc">Emergency stop and flight-envelope limits</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="card reveal" style="--i:2">
-      <h3><span class="flow-dir locstream">Localization Stream</span> Cameras → Server</h3>
-      <div class="flow-items" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:4px;">
-        <div class="flow-item">
-          <div>
-            <span class="flow-item-label">Marker Detections</span>
-            <span class="flow-item-desc">Raw IR marker positions per frame from each camera</span>
-          </div>
-        </div>
-        <div class="flow-item">
-          <div>
-            <span class="flow-item-label">Calculated Positions</span>
-            <span class="flow-item-desc">Fused 2D/3D drone positions after multi-camera triangulation</span>
-          </div>
-        </div>
-      </div>
+    <div class="dataflow-wrap reveal" style="--i:0">
+      <img src="images/dataflow.jpg" alt="System data flow diagram showing the computer side (Web Frontend with React and Three.js → HTTP API → Python Backend with Flask, OpenCV, NumPy; 4 USB Cameras → Python Backend; Python Backend → Serial Port → ESP32 Sender) connecting via the ESP-NOW Wireless Protocol to the drone side (ESP32 Receiver → SBUS/UART Commands → Flight Controller running Betaflight)" class="dataflow-diagram">
     </div>
   </div>
 </section>
@@ -1330,8 +1308,8 @@
           <div class="loc-point reveal" style="--i:1">
             <div class="loc-num">02</div>
             <div>
-              <h4>IR Markers on Drones</h4>
-              <p>Drones carry IR LEDs or retroreflective markers that are easily detectable against the background.</p>
+              <h4>Colored LEDs on Drones</h4>
+              <p>Drones carry colored LEDs that are easily detectable by the cameras and distinguishable from one another and from the background.</p>
             </div>
           </div>
           <div class="loc-point reveal" style="--i:2">
@@ -1476,15 +1454,18 @@
       <div class="card hw-card reveal" style="--i:2">
         <div class="hw-icon" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
-            <line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/>
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-            <line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/>
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <rect x="8" y="8" width="8" height="8" rx="1"/>
+            <line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/>
+            <line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="8" x2="5" y2="8"/><line x1="3" y1="16" x2="5" y2="16"/>
+            <line x1="19" y1="8" x2="21" y2="8"/><line x1="19" y1="16" x2="21" y2="16"/>
+            <line x1="8" y1="3" x2="8" y2="5"/><line x1="16" y1="3" x2="16" y2="5"/>
+            <line x1="8" y1="19" x2="8" y2="21"/><line x1="16" y1="19" x2="16" y2="21"/>
           </svg>
         </div>
-        <h4>IR LEDs / Markers</h4>
-        <p>Infrared emitters on drones for camera-based detection</p>
+        <h4>ESP32</h4>
+        <p>Wireless bridge — sender on PC and receiver on each drone, linked via ESP-NOW</p>
       </div>
       <div class="card hw-card reveal" style="--i:3">
         <div class="hw-icon" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);">
@@ -1495,7 +1476,7 @@
           </svg>
         </div>
         <h4>Overhead Cameras</h4>
-        <p>Top-mounted cameras capturing the full flight arena</p>
+        <p>Top-mounted USB cameras capturing the full flight arena</p>
       </div>
       <div class="card hw-card reveal" style="--i:4">
         <div class="hw-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);">
@@ -1512,14 +1493,15 @@
       <div class="card hw-card reveal" style="--i:5">
         <div class="hw-icon" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
-            <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
-            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
-            <circle cx="12" cy="20" r="1"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 5v-2"/><path d="M12 21v-2"/>
+            <path d="M5 12h-2"/><path d="M21 12h-2"/>
+            <path d="M16.95 7.05l1.41-1.41"/><path d="M5.64 18.36l1.41-1.41"/>
+            <path d="M16.95 16.95l1.41 1.41"/><path d="M5.64 5.64l1.41 1.41"/>
           </svg>
         </div>
-        <h4>Wi-Fi Hardware</h4>
-        <p>Wireless communication between drones and the server</p>
+        <h4>Colored LEDs</h4>
+        <p>Visible-color LEDs on each drone for camera-based position detection</p>
       </div>
     </div>
   </div>
@@ -1648,7 +1630,7 @@
     <div class="sec-divider"></div>
     <div class="team-grid">
       <div class="card team-card reveal" style="--i:0">
-        <div class="avatar">SH</div>
+        <img class="team-photo" src="images/e21180.jpg" alt="Siyumi Herath">
         <div>
           <h3>Siyumi Herath</h3>
           <div class="e-number">E/21/180</div>
@@ -1656,7 +1638,7 @@
         <a href="mailto:e21180@eng.pdn.ac.lk">e21180@eng.pdn.ac.lk</a>
       </div>
       <div class="card team-card reveal" style="--i:1">
-        <div class="avatar">IK</div>
+        <img class="team-photo" src="images/e21217.jpg" alt="Ishan Kaushalya">
         <div>
           <h3>Ishan Kaushalya</h3>
           <div class="e-number">E/21/217</div>
@@ -1664,7 +1646,7 @@
         <a href="mailto:e21217@eng.pdn.ac.lk">e21217@eng.pdn.ac.lk</a>
       </div>
       <div class="card team-card reveal" style="--i:2">
-        <div class="avatar">LA</div>
+        <img class="team-photo" src="images/e21009.jpg" alt="Lisitha Abeysekara">
         <div>
           <h3>Lisitha Abeysekara</h3>
           <div class="e-number">E/21/009</div>
@@ -1672,7 +1654,7 @@
         <a href="mailto:e21009@eng.pdn.ac.lk">e21009@eng.pdn.ac.lk</a>
       </div>
       <div class="card team-card reveal" style="--i:3">
-        <div class="avatar">TG</div>
+        <img class="team-photo" src="images/e21156.jpg" alt="Thinula Gunaratne">
         <div>
           <h3>Thinula Gunaratne</h3>
           <div class="e-number">E/21/156</div>
@@ -1690,8 +1672,8 @@
           </svg>
         </div>
         <div>
-          <h4>Dr. Supervisor 1</h4>
-          <a href="mailto:email@eng.pdn.ac.lk">email@eng.pdn.ac.lk</a>
+          <h4>Ms. Yasodha Vimukthi</h4>
+          <a href="mailto:yasodhav@eng.pdn.ac.lk">yasodhav@eng.pdn.ac.lk</a>
         </div>
       </div>
       <div class="card sup-card reveal" style="--i:5">
@@ -1701,8 +1683,19 @@
           </svg>
         </div>
         <div>
-          <h4>Supervisor 2</h4>
-          <a href="mailto:email@eng.pdn.ac.lk">email@eng.pdn.ac.lk</a>
+          <h4>Kavindu Methpura</h4>
+          <a href="mailto:e20254@eng.pdn.ac.lk">e20254@eng.pdn.ac.lk</a>
+        </div>
+      </div>
+      <div class="card sup-card reveal" style="--i:6">
+        <div class="sup-avatar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <div>
+          <h4>Nuwan Jaliyagoda</h4>
+          <a href="mailto:nuwanjaliyagoda@eng.pdn.ac.lk">nuwanjaliyagoda@eng.pdn.ac.lk</a>
         </div>
       </div>
     </div>
@@ -1722,6 +1715,12 @@
   <div class="footer-dept">
     Department of Computer Engineering,
     <a href="https://eng.pdn.ac.lk/" target="_blank" rel="noopener">University of Peradeniya</a>
+  </div>
+  <div style="margin-top:18px;">
+    <a class="nav-github" href="https://github.com/cepdnaclk/e21-3yp-Drone-Swarm" target="_blank" rel="noopener" style="margin-left:0;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      cepdnaclk/e21-3yp-Drone-Swarm
+    </a>
   </div>
 </footer>
 

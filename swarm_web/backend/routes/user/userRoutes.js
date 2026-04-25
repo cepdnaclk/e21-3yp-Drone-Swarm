@@ -1,6 +1,5 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/User");
 
@@ -26,65 +25,23 @@ router.post("/register", async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const verificationToken = crypto.randomBytes(32).toString("hex");
 
-        const user = await User.create({
+        await User.create({
             name,
             email: email.toLowerCase(),
             phone,
             password: hashedPassword,
             isVerified: false,
-            verificationToken,
         });
 
         return res.status(201).json({
             ok: true,
-            message: "User registered successfully. Please verify your account.",
-            verificationToken:
-                process.env.NODE_ENV === "production"
-                    ? undefined
-                    : user.verificationToken,
+            message: "User registered successfully. Wait for admin approval.",
         });
     } catch (error) {
         return res.status(500).json({
             ok: false,
             message: "Failed to register user.",
-            error: error.message,
-        });
-    }
-});
-
-router.get("/verify/:token", async (req, res) => {
-    try {
-        const { token } = req.params;
-
-        if (!token) {
-            return res.status(400).json({
-                ok: false,
-                message: "Verification token is required.",
-            });
-        }
-
-        const user = await User.findOne({ verificationToken: token });
-        if (!user) {
-            return res.status(400).json({
-                ok: false,
-                message: "Invalid or expired verification token.",
-            });
-        }
-
-        user.isVerified = true;
-        user.verificationToken = undefined;
-        await user.save();
-
-        return res.status(200).json({
-            ok: true,
-            message: "User verified successfully.",
-        });
-    } catch (error) {
-        return res.status(500).json({
-            ok: false,
-            message: "Failed to verify user.",
             error: error.message,
         });
     }
@@ -120,7 +77,7 @@ router.post("/login", async (req, res) => {
         if (!user.isVerified) {
             return res.status(403).json({
                 ok: false,
-                message: "Please verify your account before login.",
+                message: "Your account is pending admin approval.",
             });
         }
 

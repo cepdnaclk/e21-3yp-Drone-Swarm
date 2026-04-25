@@ -66,7 +66,6 @@ router.patch("/verify-user", async (req, res) => {
         }
 
         user.isVerified = true;
-        user.verificationToken = undefined;
         await user.save();
 
         return res.status(200).json({

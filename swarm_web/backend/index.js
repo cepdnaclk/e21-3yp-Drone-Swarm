@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const { config } = require("dotenv");
 const userRoutes = require("./routes/user/userRoutes");
 const adminRoutes = require("./routes/admin/adminRoutes");
+const projectRoutes = require("./routes/project/projectRoutes");
 
 
 config();
@@ -26,6 +27,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/projects", projectRoutes);
 
 app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true, service: "backend" });

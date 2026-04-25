@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="980" viewBox="0 0 1400 980">
+  <defs>
+    <style>
+      .bg { fill: #f4f7fb; }
+      .title { font: 700 34px Arial, sans-serif; fill: #10243e; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #48627d; }
+      .box { fill: #ffffff; stroke: #1f4b7a; stroke-width: 2.5; rx: 18; ry: 18; }
+      .boxAlt { fill: #eaf4ff; stroke: #1f4b7a; stroke-width: 2.5; rx: 18; ry: 18; }
+      .boxProc { fill: #eefbf1; stroke: #2e7d4f; stroke-width: 2.5; rx: 18; ry: 18; }
+      .boxApi { fill: #fff5e8; stroke: #b96b16; stroke-width: 2.5; rx: 18; ry: 18; }
+      .head { font: 700 22px Arial, sans-serif; fill: #10243e; }
+      .text { font: 400 17px Arial, sans-serif; fill: #20364d; }
+      .small { font: 400 15px Arial, sans-serif; fill: #4b6178; }
+      .label { font: 700 16px Arial, sans-serif; fill: #10243e; }
+      .arrow { stroke: #284d73; stroke-width: 3.5; fill: none; marker-end: url(#arrowHead); }
+      .dash { stroke: #6c7f92; stroke-width: 2.5; fill: none; stroke-dasharray: 10 8; marker-end: url(#arrowHeadGray); }
+    </style>
+    <marker id="arrowHead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#284d73"/>
+    </marker>
+    <marker id="arrowHeadGray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#6c7f92"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1400" height="980"/>
+
+  <text class="title" x="700" y="58" text-anchor="middle">Radar Tracker Data Flow</text>
+  <text class="subtitle" x="700" y="88" text-anchor="middle">Actual path: Python tracker stores data, Flask exposes URLs, browser pulls data over HTTP</text>
+
+  <rect class="box" x="70" y="150" width="250" height="120" rx="18" ry="18"/>
+  <text class="head" x="195" y="190" text-anchor="middle">4 Webcams</text>
+  <text class="text" x="195" y="220" text-anchor="middle">Camera IDs: 1, 2, 3, 4</text>
+  <text class="small" x="195" y="248" text-anchor="middle">Raw image frames captured by OpenCV</text>
+
+  <rect class="boxAlt" x="390" y="150" width="290" height="120" rx="18" ry="18"/>
+  <text class="head" x="535" y="190" text-anchor="middle">ThreadedCamera Buffers</text>
+  <text class="text" x="535" y="220" text-anchor="middle">Latest frame kept in memory</text>
+  <text class="small" x="535" y="248" text-anchor="middle">Each camera runs continuous frame updates</text>
+
+  <rect class="boxProc" x="760" y="130" width="300" height="160" rx="18" ry="18"/>
+  <text class="head" x="910" y="172" text-anchor="middle">LED Detection</text>
+  <text class="text" x="910" y="204" text-anchor="middle">Read red channel</text>
+  <text class="text" x="910" y="232" text-anchor="middle">Threshold bright pixels</text>
+  <text class="text" x="910" y="260" text-anchor="middle">Find contours and centroid</text>
+
+  <rect class="boxProc" x="1120" y="130" width="220" height="160" rx="18" ry="18"/>
+  <text class="head" x="1230" y="172" text-anchor="middle">2D Detections</text>
+  <text class="text" x="1230" y="204" text-anchor="middle">Per camera:</text>
+  <text class="text" x="1230" y="232" text-anchor="middle">(x, y) pixel point</text>
+  <text class="small" x="1230" y="260" text-anchor="middle">or no detection</text>
+
+  <rect class="box" x="70" y="370" width="300" height="170" rx="18" ry="18"/>
+  <text class="head" x="220" y="410" text-anchor="middle">Calibration Data</text>
+  <text class="text" x="220" y="442" text-anchor="middle">camera_1_params.json ... camera_4_params.json</text>
+  <text class="text" x="220" y="472" text-anchor="middle">final_system_calibration.json</text>
+  <text class="small" x="220" y="504" text-anchor="middle">Intrinsics, extrinsics, world_matrix</text>
+
+  <rect class="boxProc" x="450" y="360" width="360" height="190" rx="18" ry="18"/>
+  <text class="head" x="630" y="402" text-anchor="middle">Triangulation + World Transform</text>
+  <text class="text" x="630" y="434" text-anchor="middle">Use every valid camera pair</text>
+  <text class="text" x="630" y="464" text-anchor="middle">Triangulate 3D point from 2D detections</text>
+  <text class="text" x="630" y="494" text-anchor="middle">Average all reconstructed 3D points</text>
+  <text class="text" x="630" y="524" text-anchor="middle">Apply world_matrix to get world coordinates</text>
+
+  <rect class="boxAlt" x="900" y="380" width="240" height="150" rx="18" ry="18"/>
+  <text class="head" x="1020" y="422" text-anchor="middle">Tracked Point</text>
+  <text class="text" x="1020" y="454" text-anchor="middle">Current 3D position</text>
+  <text class="text" x="1020" y="484" text-anchor="middle">X, Y, Z in meters</text>
+
+  <rect class="boxAlt" x="1180" y="380" width="170" height="150" rx="18" ry="18"/>
+  <text class="head" x="1265" y="422" text-anchor="middle">Path History</text>
+  <text class="text" x="1265" y="454" text-anchor="middle">Recent trail</text>
+  <text class="small" x="1265" y="484" text-anchor="middle">up to 60 points</text>
+
+  <rect class="boxApi" x="70" y="615" width="320" height="165" rx="18" ry="18"/>
+  <text class="head" x="230" y="657" text-anchor="middle">Python Tracker State</text>
+  <text class="text" x="230" y="689" text-anchor="middle">latest_state dictionary</text>
+  <text class="text" x="230" y="719" text-anchor="middle">current_point, path_history</text>
+  <text class="text" x="230" y="749" text-anchor="middle">cameras, message, status</text>
+
+  <rect class="boxApi" x="430" y="615" width="255" height="165" rx="18" ry="18"/>
+  <text class="head" x="557" y="657" text-anchor="middle">Flask JSON Route</text>
+  <text class="text" x="557" y="689" text-anchor="middle">`/api/state`</text>
+  <text class="text" x="557" y="719" text-anchor="middle">jsonify(...)</text>
+  <text class="small" x="557" y="749" text-anchor="middle">Python dict -&gt; JSON response</text>
+
+  <rect class="box" x="725" y="615" width="270" height="165" rx="18" ry="18"/>
+  <text class="head" x="860" y="657" text-anchor="middle">Browser Request</text>
+  <text class="text" x="860" y="689" text-anchor="middle">`fetch('/api/state')`</text>
+  <text class="text" x="860" y="719" text-anchor="middle">receive JSON</text>
+  <text class="small" x="860" y="749" text-anchor="middle">runs every 120 ms</text>
+
+  <rect class="box" x="1035" y="615" width="295" height="165" rx="18" ry="18"/>
+  <text class="head" x="1182" y="657" text-anchor="middle">Frontend Update</text>
+  <text class="text" x="1182" y="689" text-anchor="middle">update coordinates</text>
+  <text class="text" x="1182" y="719" text-anchor="middle">draw trail and camera markers</text>
+  <text class="small" x="1182" y="749" text-anchor="middle">change badges and status text</text>
+
+  <rect class="boxApi" x="70" y="815" width="320" height="110" rx="18" ry="18"/>
+  <text class="head" x="230" y="857" text-anchor="middle">Annotated JPEG Frames</text>
+  <text class="text" x="230" y="889" text-anchor="middle">stored in `self.frames`</text>
+
+  <rect class="boxApi" x="430" y="815" width="255" height="110" rx="18" ry="18"/>
+  <text class="head" x="557" y="857" text-anchor="middle">Flask Video Route</text>
+  <text class="text" x="557" y="889" text-anchor="middle">`/video/&lt;camera_id&gt;` MJPEG stream</text>
+
+  <rect class="box" x="725" y="815" width="270" height="110" rx="18" ry="18"/>
+  <text class="head" x="860" y="857" text-anchor="middle">Browser Image Source</text>
+  <text class="text" x="860" y="889" text-anchor="middle">`img.src = '/video/1'` etc.</text>
+
+  <rect class="box" x="1035" y="815" width="295" height="110" rx="18" ry="18"/>
+  <text class="head" x="1182" y="857" text-anchor="middle">Live Camera View</text>
+  <text class="text" x="1182" y="889" text-anchor="middle">browser displays streaming frames</text>
+
+  <path class="arrow" d="M320 210 L390 210"/>
+  <path class="arrow" d="M680 210 L760 210"/>
+  <path class="arrow" d="M1060 210 L1120 210"/>
+
+  <path class="arrow" d="M1230 290 L1230 335 L810 335 L810 400"/>
+  <path class="arrow" d="M370 455 L450 455"/>
+  <path class="arrow" d="M810 455 L900 455"/>
+  <path class="arrow" d="M1140 455 L1180 455"/>
+
+  <path class="arrow" d="M1020 530 L1020 575 L230 575 L230 615"/>
+  <path class="arrow" d="M1265 530 L1265 585 L230 585 L230 615"/>
+  <path class="dash" d="M535 270 L535 575 L230 575 L230 615"/>
+
+  <path class="arrow" d="M390 697 L430 697"/>
+  <path class="arrow" d="M685 697 L725 697"/>
+  <path class="arrow" d="M995 697 L1035 697"/>
+
+  <path class="dash" d="M1182 780 L1182 800 L860 800 L860 815"/>
+  <path class="arrow" d="M390 870 L430 870"/>
+  <path class="arrow" d="M685 870 L725 870"/>
+  <path class="arrow" d="M995 870 L1035 870"/>
+
+  <text class="label" x="585" y="322" text-anchor="middle">continuous frame processing</text>
+  <text class="label" x="700" y="592" text-anchor="middle">backend to frontend via HTTP requests</text>
+  <text class="label" x="700" y="798" text-anchor="middle">separate path for MJPEG camera stream</text>
+
+</svg>

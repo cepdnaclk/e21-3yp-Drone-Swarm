@@ -1,0 +1,1870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Drone Swarm Research Platform — Low-budget platform for drone swarm research and education. Under PeraSwarm, Department of Computer Engineering, University of Peradeniya.">
+  <title>Drone Swarm Research Platform | PeraSwarm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ── Tokens ──────────────────────────────────────────────── */
+    :root {
+      --bg-base:    #070B14;
+      --bg-soft:    #0D1117;
+      --bg-card:    rgba(13, 17, 27, 0.72);
+      --border:     rgba(59, 130, 246, 0.18);
+      --border-h:   rgba(59, 130, 246, 0.45);
+      --text:       #E2EEFF;
+      --text-muted: #7A95BA;
+      --blue:       #3B82F6;
+      --indigo:     #6366F1;
+      --cyan:       #06B6D4;
+      --green:      #10B981;
+      --amber:      #F59E0B;
+      --red:        #EF4444;
+      --nav-h:      68px;
+      --radius:     14px;
+      --transition: 0.25s ease;
+    }
+
+    /* ── Reset ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-base);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; display: block; }
+    ul { list-style: none; }
+
+    /* ── Background canvas ───────────────────────────────────── */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Layout helpers ──────────────────────────────────────── */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    section { padding: 96px 0; position: relative; z-index: 1; }
+    .sec-label {
+      display: inline-block;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.25);
+      border-radius: 999px;
+      padding: 4px 14px;
+      margin-bottom: 16px;
+    }
+    .sec-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+    .sec-sub {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 48px;
+    }
+    .text-center { text-align: center; }
+    .text-center .sec-sub { margin-left: auto; margin-right: auto; }
+
+    /* ── Glass card ──────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      backdrop-filter: blur(12px) saturate(1.4);
+      -webkit-backdrop-filter: blur(12px) saturate(1.4);
+      transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+    }
+    .card:hover {
+      border-color: var(--border-h);
+      box-shadow: 0 0 28px rgba(59, 130, 246, 0.12);
+      transform: translateY(-3px);
+    }
+
+    /* Scroll entrance */
+    .reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity 0.5s ease calc(var(--i, 0) * 0.07s),
+                  transform 0.5s ease calc(var(--i, 0) * 0.07s);
+    }
+    .reveal.visible { opacity: 1; transform: none; }
+
+    /* ── Gradient text ───────────────────────────────────────── */
+    .grad-text {
+      background: linear-gradient(135deg, var(--blue) 0%, var(--cyan) 60%, #a5f3fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── Buttons ─────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 11px 26px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      transition: all var(--transition);
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--blue), var(--indigo));
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(59, 130, 246, 0.35);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 6px 28px rgba(59, 130, 246, 0.55);
+      transform: translateY(-2px);
+      text-decoration: none;
+      color: #fff;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--cyan);
+      border: 1px solid rgba(6, 182, 212, 0.4);
+    }
+    .btn-ghost:hover {
+      background: rgba(6, 182, 212, 0.08);
+      border-color: var(--cyan);
+      text-decoration: none;
+    }
+
+    /* ── Navbar ──────────────────────────────────────────────── */
+    #navbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      height: var(--nav-h);
+      background: rgba(7, 11, 20, 0.82);
+      backdrop-filter: blur(18px) saturate(1.3);
+      -webkit-backdrop-filter: blur(18px) saturate(1.3);
+      border-bottom: 1px solid var(--border);
+      transition: padding var(--transition), box-shadow var(--transition);
+    }
+    #navbar.scrolled {
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .nav-brand:hover { text-decoration: none; color: var(--cyan); }
+    .nav-brand svg { flex-shrink: 0; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .nav-links a {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.83rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 6px 10px;
+      border-radius: 8px;
+      transition: color var(--transition), background var(--transition);
+      text-decoration: none;
+    }
+    .nav-links a:hover,
+    .nav-links a.active {
+      color: var(--cyan);
+      background: rgba(6, 182, 212, 0.08);
+    }
+    #hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      cursor: pointer;
+      padding: 8px;
+      background: none;
+      border: none;
+    }
+    #hamburger span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      background: var(--text);
+      border-radius: 2px;
+      transition: all var(--transition);
+    }
+    #hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    #hamburger.open span:nth-child(2) { opacity: 0; }
+    #hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    /* ── Hero ────────────────────────────────────────────────── */
+    #home {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: calc(var(--nav-h) + 60px) 24px 80px;
+    }
+    .hero-eyebrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 24px;
+      opacity: 0;
+      animation: fadeInUp 0.7s ease 0.1s both;
+    }
+    .hero-eyebrow span {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .hero-eyebrow .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); }
+    .hero-h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(2.4rem, 7vw, 4.8rem);
+      font-weight: 700;
+      line-height: 1.08;
+      margin-bottom: 20px;
+      opacity: 0;
+      animation: fadeInUp 0.7s ease 0.2s both;
+    }
+    .hero-sub {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 auto 40px;
+      opacity: 0;
+      animation: fadeInUp 0.7s ease 0.3s both;
+    }
+
+    /* Ring animation */
+    .hero-ring-wrap {
+      position: relative;
+      width: 280px;
+      height: 280px;
+      margin: 0 auto 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      animation: fadeInUp 0.7s ease 0.15s both;
+    }
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .ring-outer {
+      width: 260px; height: 260px;
+      border: 1.5px solid rgba(6, 182, 212, 0.35);
+      animation: spin 14s linear infinite;
+    }
+    .ring-mid {
+      width: 190px; height: 190px;
+      border: 1px dashed rgba(59, 130, 246, 0.3);
+      animation: spin 9s linear infinite reverse;
+    }
+    .ring-inner {
+      width: 124px; height: 124px;
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      animation: spin 6s linear infinite;
+    }
+    .ring-dot {
+      position: absolute;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+      top: 50%; left: 50%;
+      transform-origin: 0 0;
+    }
+    .ring-dot:nth-child(1) { animation: orbit-dot 14s linear infinite; }
+    .ring-dot:nth-child(2) { animation: orbit-dot 14s linear 3.5s infinite; }
+    .ring-dot:nth-child(3) { animation: orbit-dot 14s linear 7s infinite; }
+    .ring-dot:nth-child(4) { animation: orbit-dot 14s linear 10.5s infinite; }
+
+    .hero-drone-svg {
+      position: relative;
+      z-index: 2;
+      filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.5));
+    }
+
+    .hero-stats {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0;
+      margin-bottom: 40px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 32px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      opacity: 0;
+      animation: fadeInUp 0.7s ease 0.45s both;
+    }
+    .stat-item {
+      text-align: center;
+      padding: 8px 28px;
+    }
+    .stat-item + .stat-item {
+      border-left: 1px solid var(--border);
+    }
+    .stat-val {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--blue);
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat-lbl {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .hero-ctas {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+      opacity: 0;
+      animation: fadeInUp 0.7s ease 0.55s both;
+    }
+
+    /* ── Motivation ──────────────────────────────────────────── */
+    #motivation .motive-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    .motive-card {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .motive-icon {
+      flex-shrink: 0;
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .motive-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .motive-card p { font-size: 0.88rem; color: var(--text-muted); }
+
+    /* ── Solution ────────────────────────────────────────────── */
+    #solution .solution-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: start;
+    }
+    #solution .solution-desc p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 14px;
+    }
+    .solution-features {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .solution-feat {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .feat-icon {
+      flex-shrink: 0;
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+    .solution-feat h4 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .solution-feat p { font-size: 0.82rem; color: var(--text-muted); }
+
+    /* ── Architecture ────────────────────────────────────────── */
+    #architecture .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+    }
+    .arch-card {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .arch-card-icon {
+      width: 48px; height: 48px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 4px;
+    }
+    .arch-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .arch-card ul {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .arch-card ul li {
+      font-size: 0.83rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .arch-card ul li::before {
+      content: '';
+      flex-shrink: 0;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--cyan);
+      margin-top: 6px;
+    }
+
+    /* ── Data Flow ───────────────────────────────────────────── */
+    #dataflow .flow-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    .flow-panel h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .flow-dir {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 999px;
+    }
+    .uplink { background: rgba(16, 185, 129, 0.12); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.25); }
+    .downlink { background: rgba(59, 130, 246, 0.12); color: var(--blue); border: 1px solid rgba(59, 130, 246, 0.25); }
+    .locstream { background: rgba(245, 158, 11, 0.12); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.25); }
+    .flow-items {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .flow-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 0.84rem;
+    }
+    .flow-item code {
+      font-family: 'Space Grotesk', monospace;
+      font-size: 0.78rem;
+      color: var(--cyan);
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.2);
+      border-radius: 6px;
+      padding: 2px 8px;
+    }
+    .flow-item-label {
+      font-weight: 500;
+      color: var(--text);
+      display: block;
+      margin-bottom: 2px;
+    }
+    .flow-item-desc { color: var(--text-muted); font-size: 0.8rem; }
+
+    /* ── Localization ────────────────────────────────────────── */
+    #localization .loc-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: center;
+    }
+    #localization .loc-points {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .loc-point {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .loc-num {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--cyan);
+    }
+    .loc-point h4 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.92rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .loc-point p { font-size: 0.83rem; color: var(--text-muted); }
+    .loc-visual {
+      aspect-ratio: 1;
+      max-width: 380px;
+      border-radius: 20px;
+      border: 1px dashed var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: var(--bg-card);
+      padding: 32px;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      text-align: center;
+    }
+    .loc-visual svg { opacity: 0.4; }
+
+    /* ── Software ────────────────────────────────────────────── */
+    #software .sw-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .sw-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sw-card p { font-size: 0.85rem; color: var(--text-muted); }
+
+    /* ── Hardware ────────────────────────────────────────────── */
+    #hardware .hw-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+    }
+    .hw-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 12px;
+      padding: 24px 16px;
+    }
+    .hw-icon {
+      width: 52px; height: 52px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hw-card h4 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .hw-card p { font-size: 0.78rem; color: var(--text-muted); }
+
+    /* ── Tech Stack ──────────────────────────────────────────── */
+    #tech-stack .stack-groups {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    .stack-group h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .badge {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 5px 13px;
+      border-radius: 999px;
+      opacity: 0;
+      transform: scale(0.92);
+      transition: opacity 0.35s ease calc(var(--i, 0) * 0.05s),
+                  transform 0.35s ease calc(var(--i, 0) * 0.05s);
+    }
+    .badge.visible { opacity: 1; transform: scale(1); }
+    .badge-blue   { background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.3); color: #93C5FD; }
+    .badge-cyan   { background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.3); color: #67E8F9; }
+    .badge-indigo { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); color: #A5B4FC; }
+    .badge-green  { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: #6EE7B7; }
+    .badge-amber  { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); color: #FCD34D; }
+
+    /* ── Outcomes ────────────────────────────────────────────── */
+    #outcomes .outcomes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .outcome-card {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .outcome-num {
+      flex-shrink: 0;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--blue), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .outcome-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .outcome-card p { font-size: 0.82rem; color: var(--text-muted); }
+
+    /* ── Team ────────────────────────────────────────────────── */
+    #team .team-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-bottom: 60px;
+    }
+    .team-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 14px;
+      padding: 32px 20px;
+    }
+    .avatar {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--blue), var(--cyan));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #fff;
+      box-shadow: 0 0 24px rgba(59, 130, 246, 0.3);
+    }
+    .team-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .e-number {
+      font-size: 0.78rem;
+      color: var(--cyan);
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600;
+    }
+    .team-card a {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .team-card a:hover { color: var(--blue); }
+
+    .supervisors-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .supervisor-row {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .sup-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 24px;
+      border-left: 3px solid var(--cyan);
+      min-width: 260px;
+    }
+    .sup-avatar {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: rgba(6, 182, 212, 0.12);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .sup-card h4 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+    .sup-card a { font-size: 0.78rem; color: var(--text-muted); }
+
+    /* ── Footer ──────────────────────────────────────────────── */
+    footer {
+      position: relative;
+      z-index: 1;
+      background: rgba(7, 11, 20, 0.92);
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      text-align: center;
+    }
+    footer .footer-brand {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    footer .footer-tags {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    footer .footer-tags span {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    footer .footer-tags .sep { color: var(--border); }
+    footer .footer-dept {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    footer .footer-dept a { color: var(--text-muted); }
+    footer .footer-dept a:hover { color: var(--cyan); }
+
+    /* ── Keyframes ───────────────────────────────────────────── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      to { transform: translate(-50%,-50%) rotate(360deg); }
+    }
+    @keyframes orbit-dot {
+      0%   { transform: rotate(0deg) translateX(130px) translateY(0); }
+      100% { transform: rotate(360deg) translateX(130px) translateY(0); }
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-8px); }
+    }
+
+    /* ── Section dividers ────────────────────────────────────── */
+    .sec-divider {
+      width: 48px;
+      height: 3px;
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+      border-radius: 999px;
+      margin: 0 auto 48px;
+    }
+    .sec-divider.left { margin-left: 0; }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      #solution .solution-grid,
+      #localization .loc-grid { grid-template-columns: 1fr; }
+      .loc-visual { max-width: 100%; aspect-ratio: auto; min-height: 200px; }
+    }
+    @media (max-width: 768px) {
+      section { padding: 64px 0; }
+      .nav-links {
+        display: none;
+        position: fixed;
+        top: var(--nav-h);
+        left: 0; right: 0;
+        background: rgba(7, 11, 20, 0.97);
+        border-bottom: 1px solid var(--border);
+        flex-direction: column;
+        padding: 16px;
+        gap: 4px;
+      }
+      .nav-links.nav-open { display: flex; }
+      .nav-links a { padding: 10px 14px; font-size: 0.9rem; }
+      #hamburger { display: flex; }
+      .hero-ring-wrap { width: 220px; height: 220px; }
+      .ring-outer { width: 200px; height: 200px; }
+      .ring-mid   { width: 148px; height: 148px; }
+      .ring-inner { width: 96px;  height: 96px;  }
+      @keyframes orbit-dot {
+        0%   { transform: rotate(0deg) translateX(100px); }
+        100% { transform: rotate(360deg) translateX(100px); }
+      }
+      .hero-stats { padding: 16px; }
+      .stat-item { padding: 8px 16px; }
+      #dataflow .flow-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 480px) {
+      .hero-h1 { font-size: 2.1rem; }
+      .hero-stats { flex-wrap: wrap; gap: 8px; }
+      .stat-item + .stat-item { border-left: none; border-top: 1px solid var(--border); }
+      .stat-item { padding: 8px 12px; width: 100%; }
+      .hero-ctas { flex-direction: column; align-items: center; }
+    }
+
+    /* ── Reduced motion ──────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .hero-h1, .hero-sub, .hero-eyebrow, .hero-ring-wrap, .hero-stats, .hero-ctas {
+        opacity: 1;
+        transform: none;
+      }
+      .reveal { opacity: 1; transform: none; }
+      .badge  { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<!-- ── Navbar ──────────────────────────────────────────────── -->
+<nav id="navbar">
+  <div class="nav-inner">
+    <a class="nav-brand" href="#home">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="12" x2="4"  y2="4"/><line x1="12" y1="12" x2="20" y2="4"/>
+        <line x1="12" y1="12" x2="4"  y2="20"/><line x1="12" y1="12" x2="20" y2="20"/>
+        <circle cx="4"  cy="4"  r="2.5"/><circle cx="20" cy="4"  r="2.5"/>
+        <circle cx="4"  cy="20" r="2.5"/><circle cx="20" cy="20" r="2.5"/>
+        <rect x="9" y="9" width="6" height="6" rx="1.5" fill="none"/>
+      </svg>
+      Drone Swarm
+    </a>
+    <ul class="nav-links" id="nav-list">
+      <li><a href="#home">Home</a></li>
+      <li><a href="#motivation">Problem</a></li>
+      <li><a href="#solution">Solution</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#dataflow">Data Flow</a></li>
+      <li><a href="#localization">Localization</a></li>
+      <li><a href="#software">Software</a></li>
+      <li><a href="#hardware">Hardware</a></li>
+      <li><a href="#tech-stack">Tech Stack</a></li>
+      <li><a href="#outcomes">Outcomes</a></li>
+      <li><a href="#team">Team</a></li>
+    </ul>
+    <button id="hamburger" aria-label="Toggle navigation">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- ── Hero ────────────────────────────────────────────────── -->
+<section id="home">
+  <div class="container">
+    <div class="hero-eyebrow">
+      <span>PeraSwarm</span>
+      <div class="dot"></div>
+      <span>3rd Year Project</span>
+      <div class="dot"></div>
+      <span>University of Peradeniya</span>
+    </div>
+
+    <div class="hero-ring-wrap">
+      <div class="ring ring-outer"></div>
+      <div class="ring ring-mid"></div>
+      <div class="ring ring-inner"></div>
+      <div class="ring-dot"></div>
+      <div class="ring-dot"></div>
+      <div class="ring-dot"></div>
+      <div class="ring-dot"></div>
+      <!-- Drone SVG -->
+      <svg class="hero-drone-svg" width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="#06B6D4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="40" y1="40" x2="14" y2="14"/>
+        <line x1="40" y1="40" x2="66" y2="14"/>
+        <line x1="40" y1="40" x2="14" y2="66"/>
+        <line x1="40" y1="40" x2="66" y2="66"/>
+        <circle cx="14" cy="14" r="8"/>
+        <circle cx="66" cy="14" r="8"/>
+        <circle cx="14" cy="66" r="8"/>
+        <circle cx="66" cy="66" r="8"/>
+        <rect x="31" y="31" width="18" height="18" rx="4"/>
+        <line x1="6"  y1="14" x2="22" y2="14" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="14" y1="6"  x2="14" y2="22" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="58" y1="14" x2="74" y2="14" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="66" y1="6"  x2="66" y2="22" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="6"  y1="66" x2="22" y2="66" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="14" y1="58" x2="14" y2="74" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="58" y1="66" x2="74" y2="66" stroke-width="1" stroke-opacity="0.5"/>
+        <line x1="66" y1="58" x2="66" y2="74" stroke-width="1" stroke-opacity="0.5"/>
+      </svg>
+    </div>
+
+    <h1 class="hero-h1"><span class="grad-text">Drone Swarm</span><br>Research Platform</h1>
+    <p class="hero-sub">Low-budget platform for drone swarm research and education</p>
+
+    <div class="hero-stats">
+      <div class="stat-item"><div class="stat-val">4+</div><div class="stat-lbl">Drones</div></div>
+      <div class="stat-item"><div class="stat-val">Indoor</div><div class="stat-lbl">Localization</div></div>
+      <div class="stat-item"><div class="stat-val">Real-Time</div><div class="stat-lbl">Control</div></div>
+      <div class="stat-item"><div class="stat-val">Open</div><div class="stat-lbl">Platform</div></div>
+    </div>
+
+    <div class="hero-ctas">
+      <a href="#architecture" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        System Architecture
+      </a>
+      <a href="#tech-stack" class="btn btn-ghost">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+        </svg>
+        Tech Stack
+      </a>
+      <a href="#team" class="btn btn-ghost">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Team
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Motivation ──────────────────────────────────────────── -->
+<section id="motivation">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">Why This Project</span>
+      <h2 class="sec-title">The Problem</h2>
+      <p class="sec-sub">Drone swarm research faces significant barriers that limit access for students and researchers.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="motive-grid">
+      <div class="card motive-card reveal" style="--i:0">
+        <div class="motive-icon" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div>
+          <h3>High Cost Barrier</h3>
+          <p>Drone swarm research typically requires expensive commercial platforms and hardware, putting it out of reach for most academic labs.</p>
+        </div>
+      </div>
+      <div class="card motive-card reveal" style="--i:1">
+        <div class="motive-icon" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Expensive Motion Capture</h3>
+          <p>Commercial motion-capture systems and specialized swarm platforms cost tens of thousands of dollars, limiting access to well-funded institutions.</p>
+        </div>
+      </div>
+      <div class="card motive-card reveal" style="--i:2">
+        <div class="motive-icon" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Limited Programmability</h3>
+          <p>Existing platforms rarely offer the flexibility to define and test custom swarm algorithms without deep embedded programming expertise.</p>
+        </div>
+      </div>
+      <div class="card motive-card reveal" style="--i:3">
+        <div class="motive-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Accessibility Gap</h3>
+          <p>Students and researchers need a low-cost, flexible, programmable platform to conduct meaningful swarm experiments without prohibitive investment.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Solution ────────────────────────────────────────────── -->
+<section id="solution">
+  <div class="container">
+    <span class="sec-label">Our Approach</span>
+    <h2 class="sec-title">Proposed Solution</h2>
+    <div class="sec-divider left"></div>
+    <div class="solution-grid">
+      <div class="solution-desc reveal" style="--i:0">
+        <p>The Drone Swarm Research Platform is a low-budget, programmable testbed that lets students and researchers run custom swarm algorithms on real hardware.</p>
+        <p>The platform separates high-level intelligence from drone execution. A central PC or server handles all the heavy lifting — localization, swarm state management, algorithm execution, and command generation. The drones act as physical agents, receiving motion commands and sending back telemetry.</p>
+        <p>This architecture makes the platform easy to extend: you write your swarm algorithm in a familiar language on the server, and the drones execute it in real time.</p>
+      </div>
+      <div class="solution-features reveal" style="--i:1">
+        <div class="solution-feat">
+          <div class="feat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+          <div><h4>User-Defined Algorithms</h4><p>Write and upload your own swarm behavior; the platform executes it on live drones.</p></div>
+        </div>
+        <div class="solution-feat">
+          <div class="feat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+          <div><h4>Centralized Control Loop</h4><p>PC/server runs localization, state management, and command scheduling in one loop.</p></div>
+        </div>
+        <div class="solution-feat">
+          <div class="feat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17h7M17 14v7"/></svg></div>
+          <div><h4>Lightweight Drones</h4><p>Drones focus on execution — receive commands, fly, send telemetry. No complex onboard logic required.</p></div>
+        </div>
+        <div class="solution-feat">
+          <div class="feat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+          <div><h4>Web Dashboard</h4><p>Monitor and control experiments through a browser-based interface — no special software needed.</p></div>
+        </div>
+        <div class="solution-feat">
+          <div class="feat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--indigo)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+          <div><h4>Affordable Hardware</h4><p>Built from off-the-shelf components to keep the cost accessible for student labs and small research groups.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Architecture ────────────────────────────────────────── -->
+<section id="architecture">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">System Design</span>
+      <h2 class="sec-title">System Architecture</h2>
+      <p class="sec-sub">Five interconnected layers form the complete swarm research platform.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="arch-grid">
+      <div class="card arch-card reveal" style="--i:0">
+        <div class="arch-card-icon" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/>
+            <line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/>
+            <circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/>
+            <circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+          </svg>
+        </div>
+        <h3>Drone Layer</h3>
+        <ul>
+          <li>Small low-cost drones</li>
+          <li>Receive motion commands from server</li>
+          <li>Send telemetry and health data</li>
+        </ul>
+      </div>
+      <div class="card arch-card reveal" style="--i:1">
+        <div class="arch-card-icon" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 6l11 6 11-6"/><path d="M1 12l11 6 11-6"/>
+          </svg>
+        </div>
+        <h3>Localization Layer</h3>
+        <ul>
+          <li>Top-mounted overhead cameras</li>
+          <li>IR markers / LEDs on drones</li>
+          <li>Computes real-time positions</li>
+        </ul>
+      </div>
+      <div class="card arch-card reveal" style="--i:2">
+        <div class="arch-card-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/>
+            <line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+          </svg>
+        </div>
+        <h3>Backend Server</h3>
+        <ul>
+          <li>Maintains swarm state</li>
+          <li>Runs the control loop</li>
+          <li>Executes user algorithms</li>
+          <li>Generates and sends commands</li>
+        </ul>
+      </div>
+      <div class="card arch-card reveal" style="--i:3">
+        <div class="arch-card-icon" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </div>
+        <h3>User Algorithm Module</h3>
+        <ul>
+          <li>User-defined swarm behavior</li>
+          <li>Input: current swarm state</li>
+          <li>Output: target positions / velocities</li>
+        </ul>
+      </div>
+      <div class="card arch-card reveal" style="--i:4">
+        <div class="arch-card-icon" style="background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.25);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+        </div>
+        <h3>Web Dashboard</h3>
+        <ul>
+          <li>Start / stop experiments</li>
+          <li>Upload or select algorithms</li>
+          <li>View drone positions and telemetry</li>
+          <li>Monitor system state</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Data Flow ───────────────────────────────────────────── -->
+<section id="dataflow">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">Communication</span>
+      <h2 class="sec-title">Data &amp; Control Flow</h2>
+      <p class="sec-sub">How information moves between drones, cameras, and the server.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="flow-grid">
+      <div class="card reveal" style="--i:0">
+        <h3><span class="flow-dir uplink">Uplink</span> Drone → Server</h3>
+        <div class="flow-items">
+          <div class="flow-item">
+            <div>
+              <span class="flow-item-label">Battery Level</span>
+              <span class="flow-item-desc">Remaining charge percentage</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div>
+              <span class="flow-item-label">Flight Mode</span>
+              <span class="flow-item-desc">Current operating state of the drone</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div>
+              <span class="flow-item-label">Wi-Fi Signal / RSSI</span>
+              <span class="flow-item-desc">Link quality to server</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div>
+              <span class="flow-item-label">Error Flags</span>
+              <span class="flow-item-desc">Hardware or software faults</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card reveal" style="--i:1">
+        <h3><span class="flow-dir downlink">Downlink</span> Server → Drone</h3>
+        <div class="flow-items">
+          <div class="flow-item">
+            <div>
+              <code>SETPOINT_POSITION(x, y, z)</code>
+              <span class="flow-item-desc">Target position in 3D space</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div>
+              <code>SETPOINT_VELOCITY(vx, vy, vz)</code>
+              <span class="flow-item-desc">Target velocity vector</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div>
+              <code>TAKEOFF / LAND / HOLD</code>
+              <span class="flow-item-desc">Critical flight-phase commands</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div>
+              <code>KILL / SET_LIMITS</code>
+              <span class="flow-item-desc">Emergency stop and flight-envelope limits</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card reveal" style="--i:2">
+      <h3><span class="flow-dir locstream">Localization Stream</span> Cameras → Server</h3>
+      <div class="flow-items" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:4px;">
+        <div class="flow-item">
+          <div>
+            <span class="flow-item-label">Marker Detections</span>
+            <span class="flow-item-desc">Raw IR marker positions per frame from each camera</span>
+          </div>
+        </div>
+        <div class="flow-item">
+          <div>
+            <span class="flow-item-label">Calculated Positions</span>
+            <span class="flow-item-desc">Fused 2D/3D drone positions after multi-camera triangulation</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Localization ────────────────────────────────────────── -->
+<section id="localization">
+  <div class="container">
+    <div class="loc-grid">
+      <div>
+        <span class="sec-label">Indoor Positioning</span>
+        <h2 class="sec-title">Localization System</h2>
+        <div class="sec-divider left"></div>
+        <div class="loc-points">
+          <div class="loc-point reveal" style="--i:0">
+            <div class="loc-num">01</div>
+            <div>
+              <h4>Overhead Cameras</h4>
+              <p>Top-mounted cameras provide a bird's-eye view of the entire flight arena with minimal occlusion.</p>
+            </div>
+          </div>
+          <div class="loc-point reveal" style="--i:1">
+            <div class="loc-num">02</div>
+            <div>
+              <h4>IR Markers on Drones</h4>
+              <p>Drones carry IR LEDs or retroreflective markers that are easily detectable against the background.</p>
+            </div>
+          </div>
+          <div class="loc-point reveal" style="--i:2">
+            <div class="loc-num">03</div>
+            <div>
+              <h4>Multi-Camera Fusion</h4>
+              <p>Multiple cameras improve coverage and accuracy through triangulation and cross-validation.</p>
+            </div>
+          </div>
+          <div class="loc-point reveal" style="--i:3">
+            <div class="loc-num">04</div>
+            <div>
+              <h4>Low-Cost Alternative</h4>
+              <p>Achieves indoor positioning without expensive commercial motion-capture systems.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="loc-visual reveal" style="--i:4">
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="var(--cyan)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5">
+          <rect x="5" y="5" width="70" height="70" rx="8"/>
+          <circle cx="20" cy="20" r="8"/><circle cx="60" cy="20" r="8"/>
+          <circle cx="20" cy="60" r="8"/><circle cx="60" cy="60" r="8"/>
+          <circle cx="40" cy="40" r="6" fill="rgba(6,182,212,0.15)"/>
+          <line x1="20" y1="20" x2="40" y2="40"/>
+          <line x1="60" y1="20" x2="40" y2="40"/>
+          <line x1="20" y1="60" x2="40" y2="40"/>
+          <line x1="60" y1="60" x2="40" y2="40"/>
+        </svg>
+        <p style="font-size:0.8rem;color:var(--text-muted);">
+          System overview image<br>
+          <span style="font-size:0.72rem;opacity:0.6;">Place your diagram at docs/images/localization.png</span>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Software ───────────────────────────────────────────── -->
+<section id="software">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">Platform Internals</span>
+      <h2 class="sec-title">Software Platform</h2>
+      <p class="sec-sub">Six modules that together form the server-side of the research platform.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="sw-grid">
+      <div class="card sw-card reveal" style="--i:0">
+        <h3>
+          <span style="width:32px;height:32px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          </span>
+          Backend Server
+        </h3>
+        <p>Main coordination layer. Orchestrates all other modules and handles communication with drones and the web dashboard.</p>
+      </div>
+      <div class="card sw-card reveal" style="--i:1">
+        <h3>
+          <span style="width:32px;height:32px;border-radius:10px;background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.25);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><circle cx="12" cy="12" r="4"/></svg>
+          </span>
+          Swarm State Manager
+        </h3>
+        <p>Stores the latest position and telemetry data for each drone. Provides a unified view of swarm state to all other modules.</p>
+      </div>
+      <div class="card sw-card reveal" style="--i:2">
+        <h3>
+          <span style="width:32px;height:32px;border-radius:10px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </span>
+          Swarm Engine
+        </h3>
+        <p>Runs user-defined swarm algorithms each control-loop tick. Receives current state, produces target positions or velocities.</p>
+      </div>
+      <div class="card sw-card reveal" style="--i:3">
+        <h3>
+          <span style="width:32px;height:32px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+          Command Scheduler
+        </h3>
+        <p>Converts algorithm outputs into drone commands. Handles command timing, sequencing, and priority to ensure safe execution.</p>
+      </div>
+      <div class="card sw-card reveal" style="--i:4">
+        <h3>
+          <span style="width:32px;height:32px;border-radius:10px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </span>
+          Logger
+        </h3>
+        <p>Records drone positions, telemetry, issued commands, and experiment metadata. Data is available for post-experiment analysis.</p>
+      </div>
+      <div class="card sw-card reveal" style="--i:5">
+        <h3>
+          <span style="width:32px;height:32px;border-radius:10px;background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.25);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </span>
+          Web Dashboard
+        </h3>
+        <p>Browser-based interface for monitoring and controlling experiments. No special client software required.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Hardware ────────────────────────────────────────────── -->
+<section id="hardware">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">Physical Components</span>
+      <h2 class="sec-title">Hardware</h2>
+      <p class="sec-sub">Off-the-shelf components chosen for affordability and availability.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="hw-grid">
+      <div class="card hw-card reveal" style="--i:0">
+        <div class="hw-icon" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/>
+            <line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/>
+            <circle cx="5" cy="5" r="2.2"/><circle cx="19" cy="5" r="2.2"/>
+            <circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/>
+            <rect x="9.5" y="9.5" width="5" height="5" rx="1.2" fill="none"/>
+          </svg>
+        </div>
+        <h4>Mini Drones</h4>
+        <p>Small, low-cost quad rotors as physical swarm agents</p>
+      </div>
+      <div class="card hw-card reveal" style="--i:1">
+        <div class="hw-icon" style="background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.25);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+            <circle cx="12" cy="12" r="3"/>
+            <line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/>
+            <line x1="9" y1="4" x2="9" y2="20"/><line x1="15" y1="4" x2="15" y2="20"/>
+          </svg>
+        </div>
+        <h4>Flight Controller</h4>
+        <p>Onboard controller for stabilization and command execution</p>
+      </div>
+      <div class="card hw-card reveal" style="--i:2">
+        <div class="hw-icon" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
+            <line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/>
+          </svg>
+        </div>
+        <h4>IR LEDs / Markers</h4>
+        <p>Infrared emitters on drones for camera-based detection</p>
+      </div>
+      <div class="card hw-card reveal" style="--i:3">
+        <div class="hw-icon" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="8" width="20" height="12" rx="2"/>
+            <path d="M6 8V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3"/>
+            <circle cx="12" cy="14" r="2"/>
+          </svg>
+        </div>
+        <h4>Overhead Cameras</h4>
+        <p>Top-mounted cameras capturing the full flight arena</p>
+      </div>
+      <div class="card hw-card reveal" style="--i:4">
+        <div class="hw-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="8" rx="2"/>
+            <rect x="2" y="14" width="20" height="8" rx="2"/>
+            <line x1="6" y1="6" x2="6.01" y2="6"/>
+            <line x1="6" y1="18" x2="6.01" y2="18"/>
+          </svg>
+        </div>
+        <h4>PC / Server</h4>
+        <p>Runs localization, swarm engine, and dashboard backend</p>
+      </div>
+      <div class="card hw-card reveal" style="--i:5">
+        <div class="hw-icon" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+            <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+            <circle cx="12" cy="20" r="1"/>
+          </svg>
+        </div>
+        <h4>Wi-Fi Hardware</h4>
+        <p>Wireless communication between drones and the server</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Tech Stack ──────────────────────────────────────────── -->
+<section id="tech-stack">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">Technologies</span>
+      <h2 class="sec-title">Tech Stack</h2>
+      <p class="sec-sub">The tools and frameworks that power the platform.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="stack-groups">
+      <div class="card reveal" style="--i:0">
+        <h3 style="color:var(--blue);">Frontend</h3>
+        <div class="badge-row">
+          <span class="badge badge-blue">React</span>
+          <span class="badge badge-blue">HTML5</span>
+          <span class="badge badge-blue">CSS3</span>
+          <span class="badge badge-blue">JavaScript</span>
+        </div>
+      </div>
+      <div class="card reveal" style="--i:1">
+        <h3 style="color:var(--cyan);">Backend</h3>
+        <div class="badge-row">
+          <span class="badge badge-cyan">Python</span>
+          <span class="badge badge-cyan">Node.js</span>
+          <span class="badge badge-cyan">WebSocket</span>
+          <span class="badge badge-cyan">REST API</span>
+        </div>
+      </div>
+      <div class="card reveal" style="--i:2">
+        <h3 style="color:var(--amber);">Computer Vision</h3>
+        <div class="badge-row">
+          <span class="badge badge-amber">OpenCV</span>
+          <span class="badge badge-amber">NumPy</span>
+          <span class="badge badge-amber">Camera Calibration</span>
+        </div>
+      </div>
+      <div class="card reveal" style="--i:3">
+        <h3 style="color:var(--indigo);">Communication</h3>
+        <div class="badge-row">
+          <span class="badge badge-indigo">Wi-Fi</span>
+          <span class="badge badge-indigo">JSON Messages</span>
+          <span class="badge badge-indigo">UDP / TCP</span>
+        </div>
+      </div>
+      <div class="card reveal" style="--i:4">
+        <h3 style="color:var(--green);">Infrastructure</h3>
+        <div class="badge-row">
+          <span class="badge badge-green">GitHub</span>
+          <span class="badge badge-green">GitHub Pages</span>
+          <span class="badge badge-green">Linux</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Outcomes ────────────────────────────────────────────── -->
+<section id="outcomes">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">Goals</span>
+      <h2 class="sec-title">Expected Outcomes</h2>
+      <p class="sec-sub">What the platform will deliver upon completion.</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="outcomes-grid">
+      <div class="card outcome-card reveal" style="--i:0">
+        <div class="outcome-num">01</div>
+        <div>
+          <h3>Real-Time Tracking</h3>
+          <p>Live position tracking of multiple drones with low-latency updates to the swarm state manager.</p>
+        </div>
+      </div>
+      <div class="card outcome-card reveal" style="--i:1">
+        <div class="outcome-num">02</div>
+        <div>
+          <h3>Swarm Control Loop</h3>
+          <p>A centralized, deterministic control loop that closes the perception-action cycle for the full swarm.</p>
+        </div>
+      </div>
+      <div class="card outcome-card reveal" style="--i:2">
+        <div class="outcome-num">03</div>
+        <div>
+          <h3>Algorithm Execution</h3>
+          <p>User-defined swarm algorithms run in real time on live drone hardware without modifying firmware.</p>
+        </div>
+      </div>
+      <div class="card outcome-card reveal" style="--i:3">
+        <div class="outcome-num">04</div>
+        <div>
+          <h3>Web Dashboard</h3>
+          <p>A browser-based interface for launching, monitoring, and stopping experiments from any device.</p>
+        </div>
+      </div>
+      <div class="card outcome-card reveal" style="--i:4">
+        <div class="outcome-num">05</div>
+        <div>
+          <h3>Experiment Logging</h3>
+          <p>Structured logs of positions, telemetry, and commands for post-experiment analysis and reproducibility.</p>
+        </div>
+      </div>
+      <div class="card outcome-card reveal" style="--i:5">
+        <div class="outcome-num">06</div>
+        <div>
+          <h3>Accessible Platform</h3>
+          <p>A working testbed built from affordable hardware, usable by student labs and small research groups.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Team ────────────────────────────────────────────────── -->
+<section id="team">
+  <div class="container">
+    <div class="text-center">
+      <span class="sec-label">People</span>
+      <h2 class="sec-title">Our Team</h2>
+      <p class="sec-sub">Department of Computer Engineering, University of Peradeniya · E/21 Batch</p>
+    </div>
+    <div class="sec-divider"></div>
+    <div class="team-grid">
+      <div class="card team-card reveal" style="--i:0">
+        <div class="avatar">SH</div>
+        <div>
+          <h3>Siyumi Herath</h3>
+          <div class="e-number">E/21/180</div>
+        </div>
+        <a href="mailto:e21180@eng.pdn.ac.lk">e21180@eng.pdn.ac.lk</a>
+      </div>
+      <div class="card team-card reveal" style="--i:1">
+        <div class="avatar">IK</div>
+        <div>
+          <h3>Ishan Kaushalya</h3>
+          <div class="e-number">E/21/217</div>
+        </div>
+        <a href="mailto:e21217@eng.pdn.ac.lk">e21217@eng.pdn.ac.lk</a>
+      </div>
+      <div class="card team-card reveal" style="--i:2">
+        <div class="avatar">LA</div>
+        <div>
+          <h3>Lisitha Abeysekara</h3>
+          <div class="e-number">E/21/009</div>
+        </div>
+        <a href="mailto:e21009@eng.pdn.ac.lk">e21009@eng.pdn.ac.lk</a>
+      </div>
+      <div class="card team-card reveal" style="--i:3">
+        <div class="avatar">TG</div>
+        <div>
+          <h3>Thinula Gunaratne</h3>
+          <div class="e-number">E/21/156</div>
+        </div>
+        <a href="mailto:e21156@eng.pdn.ac.lk">e21156@eng.pdn.ac.lk</a>
+      </div>
+    </div>
+
+    <div class="supervisors-title">Supervisors</div>
+    <div class="supervisor-row">
+      <div class="card sup-card reveal" style="--i:4">
+        <div class="sup-avatar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <div>
+          <h4>Dr. Supervisor 1</h4>
+          <a href="mailto:email@eng.pdn.ac.lk">email@eng.pdn.ac.lk</a>
+        </div>
+      </div>
+      <div class="card sup-card reveal" style="--i:5">
+        <div class="sup-avatar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <div>
+          <h4>Supervisor 2</h4>
+          <a href="mailto:email@eng.pdn.ac.lk">email@eng.pdn.ac.lk</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ──────────────────────────────────────────────── -->
+<footer>
+  <div class="footer-brand grad-text">Drone Swarm Research Platform</div>
+  <div class="footer-tags">
+    <span>Under PeraSwarm</span>
+    <span class="sep">·</span>
+    <span>3rd Year Project</span>
+    <span class="sep">·</span>
+    <span>E/21 Batch</span>
+  </div>
+  <div class="footer-dept">
+    Department of Computer Engineering,
+    <a href="https://eng.pdn.ac.lk/" target="_blank" rel="noopener">University of Peradeniya</a>
+  </div>
+</footer>
+
+<script>
+  /* ── Background Canvas ──────────────────────────────────── */
+  (function () {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const canvas = document.getElementById('bg-canvas');
+    const ctx    = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize, { passive: true });
+
+    const particles = Array.from({ length: 55 }, () => ({
+      x:       Math.random() * window.innerWidth,
+      y:       Math.random() * window.innerHeight,
+      r:       Math.random() * 1.4 + 0.4,
+      speed:   Math.random() * 0.25 + 0.08,
+      opacity: Math.random() * 0.35 + 0.08,
+      color:   Math.random() > 0.5 ? '#3B82F6' : '#06B6D4',
+    }));
+
+    function drawDrone(x, y, size, rot, alpha) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.strokeStyle = '#06B6D4';
+      ctx.lineWidth   = 1.5;
+      ctx.lineCap     = 'round';
+      const h = size * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(-h, -h); ctx.lineTo(h, h);
+      ctx.moveTo(h, -h);  ctx.lineTo(-h, h);
+      ctx.stroke();
+      [[-h,-h],[h,-h],[-h,h],[h,h]].forEach(([cx, cy]) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, size * 0.18, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    const drones = Array.from({ length: 7 }, () => ({
+      x:     Math.random() * window.innerWidth,
+      y:     Math.random() * window.innerHeight,
+      size:  Math.random() * 36 + 28,
+      rot:   Math.random() * Math.PI * 2,
+      rspd:  (Math.random() - 0.5) * 0.004,
+      dx:    (Math.random() - 0.5) * 0.06,
+      alpha: Math.random() * 0.035 + 0.015,
+    }));
+
+    let last = 0;
+    function animate(ts) {
+      if (ts - last < 30) { requestAnimationFrame(animate); return; }
+      last = ts;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      particles.forEach(p => {
+        p.y -= p.speed;
+        if (p.y < -4) { p.y = canvas.height + 4; p.x = Math.random() * canvas.width; }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.globalAlpha = p.opacity;
+        ctx.fillStyle   = p.color;
+        ctx.fill();
+      });
+
+      drones.forEach(d => {
+        d.rot += d.rspd;
+        d.x   += d.dx;
+        if (d.x > canvas.width  + 80) d.x = -80;
+        if (d.x < -80)                d.x = canvas.width + 80;
+        drawDrone(d.x, d.y, d.size, d.rot, d.alpha);
+      });
+
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  })();
+
+  /* ── Navbar ─────────────────────────────────────────────── */
+  const navbar    = document.getElementById('navbar');
+  const hamburger = document.getElementById('hamburger');
+  const navList   = document.getElementById('nav-list');
+  const navLinks  = navList.querySelectorAll('a');
+
+  window.addEventListener('scroll', () => {
+    navbar.classList.toggle('scrolled', window.scrollY > 50);
+  }, { passive: true });
+
+  hamburger.addEventListener('click', () => {
+    hamburger.classList.toggle('open');
+    navList.classList.toggle('nav-open');
+  });
+  navLinks.forEach(a => a.addEventListener('click', () => {
+    hamburger.classList.remove('open');
+    navList.classList.remove('nav-open');
+  }));
+
+  /* ── Active nav on scroll ────────────────────────────────── */
+  const sections = document.querySelectorAll('section[id]');
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(a => a.classList.remove('active'));
+        const a = navList.querySelector(`a[href="#${entry.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { threshold: 0.35 });
+  sections.forEach(s => io.observe(s));
+
+  /* ── Smooth scroll offset ────────────────────────────────── */
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      const target = document.querySelector(a.getAttribute('href'));
+      if (!target) return;
+      e.preventDefault();
+      window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - 72, behavior: 'smooth' });
+    });
+  });
+
+  /* ── Scroll entrance ─────────────────────────────────────── */
+  const revealIO = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        revealIO.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+
+  document.querySelectorAll('.reveal, .badge').forEach((el, i) => {
+    if (!el.style.getPropertyValue('--i')) el.style.setProperty('--i', i % 10);
+    revealIO.observe(el);
+  });
+</script>
+</body>
+</html>

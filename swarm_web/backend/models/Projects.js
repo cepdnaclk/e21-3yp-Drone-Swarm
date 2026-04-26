@@ -53,11 +53,6 @@ const projectSchema = new mongoose.Schema(
             enum: ["active", "online", "maintenance", "offline"],
             default: "offline",
         },
-        lead: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
-            required: true,
-        },
         lastActiveAt: {
             type: Date,
             default: Date.now,

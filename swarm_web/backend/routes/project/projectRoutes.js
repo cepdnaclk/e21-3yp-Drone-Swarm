@@ -8,8 +8,7 @@ const router = express.Router();
 router.get("/", authenticateJWT, async (_req, res) => {
     try {
         const projects = await Project.find()
-            .sort({ createdAt: -1 })
-            .populate("lead", "name email phone");
+            .sort({ createdAt: -1 });
 
         return res.status(200).json({
             ok: true,
@@ -25,7 +24,7 @@ router.get("/", authenticateJWT, async (_req, res) => {
     }
 });
 
-router.post("/", requireAdminAccess, async (req, res) => {
+router.post("/", async (req, res) => {
     try {
         const {
             name,
@@ -33,22 +32,14 @@ router.post("/", requireAdminAccess, async (req, res) => {
             description,
             projectUrl,
             status,
-            lead,
             lastActiveAt,
             service,
         } = req.body;
 
-        if (!name || !slug || !lead) {
+        if (!name || !slug) {
             return res.status(400).json({
                 ok: false,
-                message: "name, slug and lead are required.",
-            });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(lead)) {
-            return res.status(400).json({
-                ok: false,
-                message: "Invalid lead user id.",
+                message: "name and slug are required.",
             });
         }
 
@@ -58,7 +49,6 @@ router.post("/", requireAdminAccess, async (req, res) => {
             description,
             projectUrl,
             status,
-            lead,
             lastActiveAt,
             service: {
                 internalBaseUrl: service?.internalBaseUrl || "",
@@ -109,7 +99,6 @@ router.patch("/:projectId", requireAdminAccess, async (req, res) => {
             "description",
             "projectUrl",
             "status",
-            "lead",
             "lastActiveAt",
             "service",
         ];
@@ -118,15 +107,6 @@ router.patch("/:projectId", requireAdminAccess, async (req, res) => {
         for (const field of allowedFields) {
             if (Object.prototype.hasOwnProperty.call(req.body, field)) {
                 update[field] = req.body[field];
-            }
-        }
-
-        if (Object.prototype.hasOwnProperty.call(update, "lead")) {
-            if (!mongoose.Types.ObjectId.isValid(update.lead)) {
-                return res.status(400).json({
-                    ok: false,
-                    message: "Invalid lead user id.",
-                });
             }
         }
 
@@ -148,7 +128,7 @@ router.patch("/:projectId", requireAdminAccess, async (req, res) => {
         const project = await Project.findByIdAndUpdate(projectId, update, {
             new: true,
             runValidators: true,
-        }).populate("lead", "name email phone");
+        });
 
         if (!project) {
             return res.status(404).json({

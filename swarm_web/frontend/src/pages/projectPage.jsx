@@ -26,17 +26,28 @@ function ProjectPage({ onLogout }) {
             try {
                 const response = await fetch(`${apiBase}/projects`, {
                     method: "GET",
-                    credentials: "include", // 🔥 IMPORTANT
+                    credentials: "include", 
                 });
 
-                const data = await response.json();
+                // Check for non-JSON responses (like 500 HTML errors) before parsing
+                const textData = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(textData);
+                } catch (e) {
+                    throw new Error("Server returned an invalid response.");
+                }
 
                 if (!response.ok) {
                     throw new Error(data.message || "Failed to load projects.");
                 }
 
                 if (mounted) {
-                    setProjects(Array.isArray(data.projects) ? data.projects : []);
+                    // Safely handle both [...] and { projects: [...] } backend responses
+                    const projectsList = Array.isArray(data) 
+                        ? data 
+                        : (Array.isArray(data.projects) ? data.projects : []);
+                    setProjects(projectsList);
                 }
             } catch (err) {
                 if (mounted) {
@@ -58,11 +69,11 @@ function ProjectPage({ onLogout }) {
         return projects.filter((project) => {
             const status = String(project.status || "offline").toLowerCase();
 
-            const text = [
-                project.name,
-                project.slug,
-                project.description,
-            ].join(" ").toLowerCase();
+            // filter(Boolean) prevents undefined fields from messing up the search string
+            const text = [project.name, project.slug, project.description]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase();
 
             if (filter === "online" && !["active", "online"].includes(status)) {
                 return false;
@@ -161,9 +172,13 @@ function ProjectPage({ onLogout }) {
             {/* GRID */}
             {!loading && !error && (
                 <section style={styles.grid}>
-                    {filteredProjects.map((project) => (
-                        <ProjectCard key={project._id || project.slug} project={project} />
-                    ))}
+                    {filteredProjects.length === 0 ? (
+                        <div style={{...styles.stateBox, gridColumn: "1 / -1"}}>No projects found.</div>
+                    ) : (
+                        filteredProjects.map((project) => (
+                            <ProjectCard key={project._id || project.slug || Math.random()} project={project} />
+                        ))
+                    )}
                 </section>
             )}
         </div>
@@ -181,13 +196,13 @@ function ProjectCard({ project }) {
                 </span>
             </div>
 
-            <h3 style={styles.cardTitle}>{project.name}</h3>
-            <div style={styles.cardSlug}>/{project.slug}</div>
+            <h3 style={styles.cardTitle}>{project.name || "Unnamed Project"}</h3>
+            <div style={styles.cardSlug}>/{project.slug || "no-slug"}</div>
 
-            <p style={styles.cardDesc}>{project.description}</p>
+            <p style={styles.cardDesc}>{project.description || "No description provided."}</p>
 
             <div style={styles.metaItem}>
-                Updated: {new Date(project.updatedAt).toLocaleDateString()}
+                Updated: {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : "Just now"}
             </div>
 
             {project.projectUrl ? (
@@ -211,9 +226,9 @@ function StatCard({ label, value, sub }) {
     );
 }
 
-/* SAME STYLES (unchanged) */
 const styles = {
     page: {
+        boxSizing: "border-box", // 🔥 Fixed horizontal scroll issue
         minHeight: "100vh",
         width: "100vw",
         marginLeft: "calc(50% - 50vw)",
@@ -292,7 +307,7 @@ const styles = {
         marginBottom: 10,
     },
 
-    errorBox: { color: "red" },
+    errorBox: { color: "red", backgroundColor: "#fef2f2" },
 
     grid: {
         display: "grid",
@@ -308,7 +323,7 @@ const styles = {
     },
 
     cardHeader: { marginBottom: 8 },
-    statusPill: { padding: "4px 8px", borderRadius: 999, fontSize: 11 },
+    statusPill: { padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: "bold" },
     cardTitle: { margin: 0 },
     cardSlug: { fontFamily: "monospace", fontSize: 12, color: "#6b7280" },
     cardDesc: { fontSize: 13, color: "#4b5563" },
@@ -323,12 +338,18 @@ const styles = {
         border: "1px solid #ddd",
         borderRadius: 8,
         textDecoration: "none",
+        color: "#111827",
+        fontWeight: "500",
     },
 
     noLink: {
         marginTop: 10,
         fontSize: 12,
         color: "#9ca3af",
+        padding: 8,
+        textAlign: "center",
+        border: "1px dashed #e5e7eb",
+        borderRadius: 8,
     },
 };
 

@@ -18,10 +18,10 @@ function safeJsonParse(text) {
     }
 }
 
-router.all("/:projectSlug/*", authenticateJWT, async (req, res) => {
+router.use("/:projectSlug", authenticateJWT, async (req, res) => {
     try {
         const { projectSlug } = req.params;
-        const passthroughPath = req.params[0] || "";
+        const passthroughPath = String(req.path || "").replace(/^\/+/, "");
 
         const project = await Project.findOne({ slug: projectSlug.toLowerCase() });
         if (!project) {

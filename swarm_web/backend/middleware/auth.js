@@ -3,42 +3,35 @@ const jwt = require("jsonwebtoken");
 function parseAdminEmails() {
     return String(process.env.ADMIN_EMAILS || "")
         .split(",")
-        .map((entry) => entry.trim().toLowerCase())
+        .map((e) => e.trim().toLowerCase())
         .filter(Boolean);
 }
 
+// ✅ TOKEN FROM COOKIE (NEW)
 function getTokenFromRequest(req) {
-    const authHeader = req.header("authorization") || req.header("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return "";
-    }
-
-    return authHeader.slice("Bearer ".length).trim();
+    // cookie-parser required in app.js
+    return req.cookies?.token || "";
 }
 
 function isAdminPayload(payload) {
-    if (!payload || typeof payload !== "object") {
-        return false;
-    }
+    if (!payload || typeof payload !== "object") return false;
 
-    if (payload.isAdmin === true) {
-        return true;
-    }
+    if (payload.isAdmin === true) return true;
 
     const email = String(payload.email || "").toLowerCase();
-    if (!email) {
-        return false;
-    }
+    if (!email) return false;
 
     return parseAdminEmails().includes(email);
 }
 
+// 🔐 AUTH MIDDLEWARE (COOKIE BASED)
 function authenticateJWT(req, res, next) {
     const token = getTokenFromRequest(req);
+
     if (!token) {
         return res.status(401).json({
             ok: false,
-            message: "Missing Bearer token.",
+            message: "Missing authentication cookie.",
         });
     }
 
@@ -53,8 +46,8 @@ function authenticateJWT(req, res, next) {
             isAdmin: isAdminPayload(payload),
         };
 
-        return next();
-    } catch (_error) {
+        next();
+    } catch (err) {
         return res.status(401).json({
             ok: false,
             message: "Invalid or expired token.",
@@ -62,19 +55,22 @@ function authenticateJWT(req, res, next) {
     }
 }
 
+// 🔐 ADMIN MIDDLEWARE (COOKIE BASED)
 function requireAdminAccess(req, res, next) {
     const adminSecret = process.env.ADMIN_SECRET;
     const headerSecret = req.header("x-admin-secret");
 
+    // optional bypass (service-to-service)
     if (adminSecret && headerSecret && headerSecret === adminSecret) {
         return next();
     }
 
     const token = getTokenFromRequest(req);
+
     if (!token) {
         return res.status(401).json({
             ok: false,
-            message: "Admin access requires a valid admin token or x-admin-secret.",
+            message: "Admin access requires authentication cookie.",
         });
     }
 
@@ -96,8 +92,8 @@ function requireAdminAccess(req, res, next) {
             isAdmin: true,
         };
 
-        return next();
-    } catch (_error) {
+        next();
+    } catch (err) {
         return res.status(401).json({
             ok: false,
             message: "Invalid or expired token.",

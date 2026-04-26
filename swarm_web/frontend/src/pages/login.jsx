@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import "./app-shell.css";
 
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
@@ -71,146 +72,65 @@ function LoginPage({ onLoginSuccess }) {
     }
 
     return (
-        <div
-            data-login-root="true"
-            style={{
-                minHeight: "100vh",
-                width: "100vw",
-                marginLeft: "calc(50% - 50vw)",
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                background: "#f5f5f2",
-                colorScheme: "light",
-                color: "#111827",
-            }}
-        >
-            <div
-                style={{
-                    background: "linear-gradient(180deg, #fafaf9 0%, #f2f2ef 100%)",
-                    borderRight: "1px solid #dfdfd7",
-                    padding: "40px 56px",
-                    display: "flex",
-                    flexDirection: "column",
-                    position: "relative",
-                    overflow: "hidden",
-                }}
-            >
-                <PeraSwarmMark size={26} />
+        <main className="auth-shell" data-login-root="true">
+            <section className="auth-showcase">
+                <PeraSwarmMark size={28} />
 
-                <div style={{ flex: 1, display: "flex", alignItems: "center", marginTop: 40 }}>
-                    <div>
-                        <div
-                            style={{
-                                fontSize: 11,
-                                letterSpacing: "0.12em",
-                                color: "#6f726e",
-                                textTransform: "uppercase",
-                                fontWeight: 600,
-                                marginBottom: 16,
-                            }}
-                        >
-                            Remote swarm robotics · University of Peradeniya
-                        </div>
-                        <h1
-                            style={{
-                                fontSize: 42,
-                                lineHeight: 1.08,
-                                letterSpacing: "-0.02em",
-                                fontWeight: 600,
-                                margin: "0 0 20px",
-                                maxWidth: 520,
-                                color: "#151718",
-                            }}
-                        >
-                            One framework. Every robot in the lab.
-                        </h1>
-                        <p
-                            style={{
-                                fontSize: 15,
-                                lineHeight: 1.55,
-                                color: "#555955",
-                                maxWidth: 460,
-                                margin: 0,
-                            }}
-                        >
-                            Control drones, ground robots and mixed-reality agents from a
-                            single browser. Author behaviours visually, run them remotely,
-                            study the swarm.
-                        </p>
+                <div className="auth-showcase-main">
+                    <p className="auth-kicker">Remote swarm robotics · University of Peradeniya</p>
+                    <h1>Professional control plane for autonomous swarm research.</h1>
+                    <p>
+                        Run field experiments, inspect live telemetry, and coordinate your
+                        multi-agent workflows from a single secure console.
+                    </p>
+
+                    <div className="auth-metric-grid">
+                        <article>
+                            <strong>4+</strong>
+                            <span>Camera streams</span>
+                        </article>
+                        <article>
+                            <strong>Low-latency</strong>
+                            <span>Indoor localization</span>
+                        </article>
+                        <article>
+                            <strong>Role-based</strong>
+                            <span>Access management</span>
+                        </article>
                     </div>
                 </div>
 
-                <div
-                    style={{
-                        fontSize: 11.5,
-                        color: "#8e918d",
-                        zIndex: 2,
-                        letterSpacing: "0.04em",
-                    }}
-                >
-                    v0.3.1 · build 2304-a · swarm-core.pera.lk
-                </div>
-            </div>
+                <p className="auth-build">v0.3.1 · build 2304-a · swarm-core.pera.lk</p>
+            </section>
 
-            <div
-                style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: 40,
-                    background: "#ffffff",
-                }}
-            >
-                <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 380, color: "#111827" }}>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+            <section className="auth-panel-wrap">
+                <form onSubmit={handleSubmit} className="auth-panel">
+                    <div className="auth-mode-switch">
                         <button
                             type="button"
                             onClick={() => setMode("login")}
-                            style={tabButton(mode === "login")}
+                            className={`auth-mode-btn ${mode === "login" ? "active" : ""}`}
                         >
                             Login
                         </button>
                         <button
                             type="button"
                             onClick={() => setMode("register")}
-                            style={tabButton(mode === "register")}
+                            className={`auth-mode-btn ${mode === "register" ? "active" : ""}`}
                         >
                             Register
                         </button>
                     </div>
 
-                    <div
-                        style={{
-                            fontSize: 11,
-                            letterSpacing: "0.1em",
-                            color: "#6f726e",
-                            textTransform: "uppercase",
-                            fontWeight: 600,
-                            marginBottom: 8,
-                        }}
-                    >
-                        {mode === "login" ? "Sign in" : "Sign up"}
-                    </div>
-                    <h2
-                        style={{
-                            fontSize: 24,
-                            fontWeight: 600,
-                            letterSpacing: "-0.01em",
-                            margin: "0 0 6px",
-                            color: "#111827",
-                        }}
-                    >
-                        {pageTitle}
-                    </h2>
-                    <p style={{ color: "#374151", margin: "0 0 24px", fontSize: 13.5 }}>
-                        {pageText}
-                    </p>
+                    <p className="auth-form-kicker">{mode === "login" ? "Sign in" : "Sign up"}</p>
+                    <h2>{pageTitle}</h2>
+                    <p className="auth-form-copy">{pageText}</p>
 
                     {mode === "register" ? (
-                        <div style={{ marginBottom: 12 }}>
-                            <label style={labelStyle}>Name</label>
+                        <div className="auth-field">
+                            <label htmlFor="name">Name</label>
                             <input
-                                style={inputStyle}
+                                id="name"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 required
@@ -218,10 +138,10 @@ function LoginPage({ onLoginSuccess }) {
                         </div>
                     ) : null}
 
-                    <div style={{ marginBottom: 18 }}>
-                        <label style={labelStyle}>Email</label>
+                    <div className="auth-field">
+                        <label htmlFor="email">Email</label>
                         <input
-                            style={inputStyle}
+                            id="email"
                             type="text"
                             inputMode="email"
                             autoComplete="email"
@@ -232,10 +152,10 @@ function LoginPage({ onLoginSuccess }) {
                     </div>
 
                     {mode === "register" ? (
-                        <div style={{ marginBottom: 12 }}>
-                            <label style={labelStyle}>Phone</label>
+                        <div className="auth-field">
+                            <label htmlFor="phone">Phone</label>
                             <input
-                                style={inputStyle}
+                                id="phone"
                                 value={phone}
                                 onChange={(e) => setPhone(e.target.value)}
                                 required
@@ -243,10 +163,10 @@ function LoginPage({ onLoginSuccess }) {
                         </div>
                     ) : null}
 
-                    <div style={{ marginBottom: 18 }}>
-                        <label style={labelStyle}>Password</label>
+                    <div className="auth-field">
+                        <label htmlFor="password">Password</label>
                         <input
-                            style={inputStyle}
+                            id="password"
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
@@ -255,10 +175,10 @@ function LoginPage({ onLoginSuccess }) {
                     </div>
 
                     {mode === "register" ? (
-                        <div style={{ marginBottom: 18 }}>
-                            <label style={labelStyle}>Confirm Password</label>
+                        <div className="auth-field">
+                            <label htmlFor="confirmPassword">Confirm Password</label>
                             <input
-                                style={inputStyle}
+                                id="confirmPassword"
                                 type="password"
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -267,16 +187,10 @@ function LoginPage({ onLoginSuccess }) {
                         </div>
                     ) : null}
 
-                    {message ? (
-                        <div style={successStyle}>{message}</div>
-                    ) : null}
-                    {error ? <div style={errorStyle}>{error}</div> : null}
+                    {message ? <div className="auth-alert success">{message}</div> : null}
+                    {error ? <div className="auth-alert error">{error}</div> : null}
 
-                    <button
-                        style={submitButtonStyle}
-                        type="submit"
-                        disabled={loading}
-                    >
+                    <button className="auth-submit" type="submit" disabled={loading}>
                         {loading
                             ? "Please wait..."
                             : mode === "login"
@@ -284,113 +198,24 @@ function LoginPage({ onLoginSuccess }) {
                                 : "Create account"}
                     </button>
                 </form>
-            </div>
-
-            <style>{`
-				@media (max-width: 900px) {
-					div[data-login-root="true"] {
-						grid-template-columns: 1fr;
-                        width: 100%;
-                        margin-left: 0;
-					}
-				}
-			`}</style>
-        </div>
+            </section>
+        </main>
     );
 }
 
 function PeraSwarmMark({ size = 26 }) {
     return (
-        <div
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                color: "#131516",
-                fontWeight: 700,
-            }}
-        >
+        <div className="auth-brand">
             <div
                 style={{
                     width: size,
                     height: size,
-                    borderRadius: 7,
-                    background: "linear-gradient(135deg, #111 0%, #3a5fbd 100%)",
                 }}
+                className="auth-brand-dot"
             />
-            <span style={{ fontSize: 16 }}>PeraSwarm</span>
+            <span>PeraSwarm</span>
         </div>
     );
 }
-
-function tabButton(active) {
-    return {
-        border: "1px solid #d6d7d1",
-        background: active ? "#111" : "#fff",
-        color: active ? "#fff" : "#222",
-        fontSize: 12,
-        fontWeight: 600,
-        borderRadius: 9,
-        padding: "8px 14px",
-        cursor: "pointer",
-    };
-}
-
-const labelStyle = {
-    display: "block",
-    fontSize: 12,
-    color: "#1f2937",
-    marginBottom: 6,
-    fontWeight: 600,
-};
-
-const inputStyle = {
-    display: "block",
-    width: "100%",
-    minWidth: "100%",
-    height: 40,
-    boxSizing: "border-box",
-    appearance: "none",
-    WebkitAppearance: "none",
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    color: "#111827",
-    borderRadius: 10,
-    padding: "0 12px",
-    fontSize: 14,
-    outline: "none",
-};
-
-const submitButtonStyle = {
-    width: "100%",
-    height: 42,
-    border: "none",
-    borderRadius: 10,
-    background: "#1d4ed8",
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: "pointer",
-};
-
-const successStyle = {
-    marginBottom: 12,
-    fontSize: 12.5,
-    color: "#0a7f2e",
-    background: "#edfaef",
-    border: "1px solid #bee8c6",
-    borderRadius: 8,
-    padding: "8px 10px",
-};
-
-const errorStyle = {
-    marginBottom: 12,
-    fontSize: 12.5,
-    color: "#9f1239",
-    background: "#fff1f2",
-    border: "1px solid #fecdd3",
-    borderRadius: 8,
-    padding: "8px 10px",
-};
 
 export default LoginPage;

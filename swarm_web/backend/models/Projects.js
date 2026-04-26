@@ -18,6 +18,11 @@ const projectSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+        projectUrl: {
+            type: String,
+            trim: true,
+            default: "",
+        },
         status: {
             type: String,
             enum: ["active", "online", "maintenance", "offline"],

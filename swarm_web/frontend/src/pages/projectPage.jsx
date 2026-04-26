@@ -238,6 +238,8 @@ function formatDate(value) {
 const styles = {
     page: {
         minHeight: "100vh",
+        width: "100vw",
+        marginLeft: "calc(50% - 50vw)",
         padding: "28px 34px 46px",
         boxSizing: "border-box",
         background: "radial-gradient(circle at 0% 0%, #f8fafc 0%, #eef2f7 40%, #f7f7f5 100%)",

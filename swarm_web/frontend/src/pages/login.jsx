@@ -8,6 +8,7 @@ function LoginPage({ onLoginSuccess }) {
     const [email, setEmail] = useState("researcher@pera.swarm");
     const [phone, setPhone] = useState("");
     const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
@@ -29,6 +30,10 @@ function LoginPage({ onLoginSuccess }) {
         setError("");
 
         try {
+            if (mode === "register" && password !== confirmPassword) {
+                throw new Error("Passwords do not match.");
+            }
+
             const endpoint = mode === "login" ? "/users/login" : "/users/register";
             const payload =
                 mode === "login"
@@ -70,9 +75,13 @@ function LoginPage({ onLoginSuccess }) {
             data-login-root="true"
             style={{
                 minHeight: "100vh",
+                width: "100vw",
+                marginLeft: "calc(50% - 50vw)",
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
                 background: "#f5f5f2",
+                colorScheme: "light",
+                color: "#111827",
             }}
         >
             <div
@@ -152,7 +161,7 @@ function LoginPage({ onLoginSuccess }) {
                     background: "#ffffff",
                 }}
             >
-                <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 380 }}>
+                <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 380, color: "#111827" }}>
                     <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
                         <button
                             type="button"
@@ -188,11 +197,12 @@ function LoginPage({ onLoginSuccess }) {
                             fontWeight: 600,
                             letterSpacing: "-0.01em",
                             margin: "0 0 6px",
+                            color: "#111827",
                         }}
                     >
                         {pageTitle}
                     </h2>
-                    <p style={{ color: "#555955", margin: "0 0 24px", fontSize: 13.5 }}>
+                    <p style={{ color: "#374151", margin: "0 0 24px", fontSize: 13.5 }}>
                         {pageText}
                     </p>
 
@@ -208,11 +218,13 @@ function LoginPage({ onLoginSuccess }) {
                         </div>
                     ) : null}
 
-                    <div style={{ marginBottom: 12 }}>
+                    <div style={{ marginBottom: 18 }}>
                         <label style={labelStyle}>Email</label>
                         <input
                             style={inputStyle}
-                            type="email"
+                            type="text"
+                            inputMode="email"
+                            autoComplete="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             required
@@ -242,6 +254,19 @@ function LoginPage({ onLoginSuccess }) {
                         />
                     </div>
 
+                    {mode === "register" ? (
+                        <div style={{ marginBottom: 18 }}>
+                            <label style={labelStyle}>Confirm Password</label>
+                            <input
+                                style={inputStyle}
+                                type="password"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                required
+                            />
+                        </div>
+                    ) : null}
+
                     {message ? (
                         <div style={successStyle}>{message}</div>
                     ) : null}
@@ -265,6 +290,8 @@ function LoginPage({ onLoginSuccess }) {
 				@media (max-width: 900px) {
 					div[data-login-root="true"] {
 						grid-template-columns: 1fr;
+                        width: 100%;
+                        margin-left: 0;
 					}
 				}
 			`}</style>
@@ -312,15 +339,22 @@ function tabButton(active) {
 const labelStyle = {
     display: "block",
     fontSize: 12,
-    color: "#6f726e",
+    color: "#1f2937",
     marginBottom: 6,
     fontWeight: 600,
 };
 
 const inputStyle = {
+    display: "block",
     width: "100%",
+    minWidth: "100%",
     height: 40,
-    border: "1px solid #d7d9d3",
+    boxSizing: "border-box",
+    appearance: "none",
+    WebkitAppearance: "none",
+    border: "1px solid #cbd5e1",
+    background: "#ffffff",
+    color: "#111827",
     borderRadius: 10,
     padding: "0 12px",
     fontSize: 14,

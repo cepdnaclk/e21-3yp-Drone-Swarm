@@ -1,0 +1,31 @@
+{
+    "description": "Reference camera layout for display/visualization only. This file is not a replacement for final_system_calibration.json. It is used to place camera markers in the frontend according to the intended physical setup.",
+    "units": "meters",
+    "look_at_target": [1.0, 1.5, 1.0],
+    "camera_positions": [
+        {
+            "camera_id": 1,
+            "position": [0.0, 0.0, 2.5]
+        },
+        {
+            "camera_id": 2,
+            "position": [2.0, 0.0, 2.5]
+        },
+        {
+            "camera_id": 3,
+            "position": [2.0, 3.0, 2.65]
+        },
+        {
+            "camera_id": 4,
+            "position": [0.0, 3.0, 2.65]
+        }
+    ],
+    "constraints": {
+        "cam1_cam2_distance": 2.0,
+        "cam3_cam4_distance": 2.0,
+        "cam1_cam4_distance": 3.0,
+        "cam2_cam3_distance": 3.0,
+        "cam3_cam1_height_difference": 0.15,
+        "cam4_cam1_height_difference": 0.15
+    }
+}

@@ -24,6 +24,7 @@ MAX_PATH_POINTS = 60
 STATIC_ROOT = Path(__file__).resolve().parents[2] / "frontend" / "radar-tracker"
 THREE_STATIC_ROOT = Path(__file__).resolve().parents[2] / "frontend" / "radar-tracker-three"
 BASE_DIR = Path(__file__).resolve().parents[1]
+DISPLAY_LAYOUT_PATH = BASE_DIR / "camera_layout_rectangular_display.json"
 
 
 class ThreadedCamera:
@@ -56,7 +57,49 @@ class ThreadedCamera:
         self.cap.release()
 
 
-def load_system_data() -> Tuple[List[dict], List[dict], np.ndarray]:
+def load_display_camera_layout() -> Optional[dict]:
+    if not DISPLAY_LAYOUT_PATH.exists():
+        return None
+
+    with open(DISPLAY_LAYOUT_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    positions_by_id = {
+        int(entry["camera_id"]): [float(value) for value in entry["position"]]
+        for entry in data.get("camera_positions", [])
+    }
+
+    if not all(camera_id in positions_by_id for camera_id in CAMERA_INDICES):
+        return None
+
+    layout = {
+        "camera_positions": [positions_by_id[camera_id] for camera_id in CAMERA_INDICES]
+    }
+    if "look_at_target" in data:
+        layout["look_at_target"] = [float(value) for value in data["look_at_target"]]
+    return layout
+
+
+def make_look_at_rotation_world(
+    camera_position: np.ndarray,
+    target_position: np.ndarray,
+) -> np.ndarray:
+    forward = target_position - camera_position
+    forward = forward / np.linalg.norm(forward)
+
+    up_guess = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    if abs(np.dot(forward, up_guess)) > 0.95:
+        up_guess = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+    right = np.cross(up_guess, forward)
+    right = right / np.linalg.norm(right)
+    down = np.cross(forward, right)
+    down = down / np.linalg.norm(down)
+
+    return np.vstack([right, down, forward])
+
+
+def load_system_data() -> Tuple[List[dict], List[dict], np.ndarray, Optional[dict]]:
     intrinsics = []
     for cam_id in CAMERA_INDICES:
         with open(BASE_DIR / f"camera_{cam_id}_params.json", "r", encoding="utf-8") as f:
@@ -80,7 +123,27 @@ def load_system_data() -> Tuple[List[dict], List[dict], np.ndarray]:
                 }
             )
 
-    return intrinsics, extrinsics, world_matrix
+    display_layout = load_display_camera_layout()
+    if display_layout is not None:
+        inv_world_matrix = np.linalg.inv(world_matrix)
+        world_rotation = world_matrix[:3, :3]
+        look_at_target = display_layout.get("look_at_target")
+
+        for index, world_position in enumerate(display_layout["camera_positions"]):
+            raw_camera_homog = inv_world_matrix @ np.append(
+                np.array(world_position, dtype=np.float64),
+                1.0,
+            )
+            raw_camera_center = raw_camera_homog[:3].reshape(3, 1)
+            if look_at_target is not None:
+                desired_world_rotation = make_look_at_rotation_world(
+                    np.array(world_position, dtype=np.float64),
+                    np.array(look_at_target, dtype=np.float64),
+                )
+                extrinsics[index]["R"] = desired_world_rotation @ world_rotation
+            extrinsics[index]["t"] = -extrinsics[index]["R"] @ raw_camera_center
+
+    return intrinsics, extrinsics, world_matrix, display_layout
 
 
 def triangulate_point(
@@ -103,8 +166,17 @@ def triangulate_point(
 
 class RadarTrackerService:
     def __init__(self) -> None:
-        self.intrinsics, self.extrinsics, self.world_matrix = load_system_data()
+        (
+            self.intrinsics,
+            self.extrinsics,
+            self.world_matrix,
+            display_layout,
+        ) = load_system_data()
         self.cam_world_positions = self._compute_camera_positions()
+        self.cam_world_orientations = self._compute_camera_orientations()
+        self.camera_look_at_target = (
+            display_layout.get("look_at_target") if display_layout is not None else None
+        )
         self.cameras = [ThreadedCamera(idx) for idx in CAMERA_INDICES]
         self.frames: Dict[int, bytes] = {}
         self.path_history: List[List[float]] = []
@@ -113,6 +185,8 @@ class RadarTrackerService:
             "timestamp": time.time(),
             "cameras": self._empty_camera_state(),
             "camera_positions": self.cam_world_positions,
+            "camera_orientations": self.cam_world_orientations,
+            "camera_look_at_target": self.camera_look_at_target,
             "path_history": [],
             "current_point": None,
             "message": "Tracker starting",
@@ -130,6 +204,31 @@ class RadarTrackerService:
             world_cam = self.world_matrix @ homog_cam
             positions.append(world_cam[:3].astype(float).tolist())
         return positions
+
+    def _compute_camera_orientations(self) -> List[dict]:
+        world_rotation = self.world_matrix[:3, :3]
+        orientations = []
+        for ext in self.extrinsics:
+            raw_cam_to_world = np.linalg.inv(ext["R"])
+            world_cam_to_world = world_rotation @ raw_cam_to_world
+
+            right = world_cam_to_world[:, 0]
+            down = world_cam_to_world[:, 1]
+            forward = world_cam_to_world[:, 2]
+            up = -down
+
+            right = right / np.linalg.norm(right)
+            up = up / np.linalg.norm(up)
+            forward = forward / np.linalg.norm(forward)
+
+            orientations.append(
+                {
+                    "right": right.astype(float).tolist(),
+                    "up": up.astype(float).tolist(),
+                    "forward": forward.astype(float).tolist(),
+                }
+            )
+        return orientations
 
     def _empty_camera_state(self) -> List[dict]:
         return [
@@ -293,6 +392,8 @@ class RadarTrackerService:
                     "timestamp": time.time(),
                     "cameras": camera_state,
                     "camera_positions": self.cam_world_positions,
+                    "camera_orientations": self.cam_world_orientations,
+                    "camera_look_at_target": self.camera_look_at_target,
                     "path_history": list(self.path_history),
                     "current_point": current_point,
                     "message": message,
@@ -307,6 +408,8 @@ class RadarTrackerService:
                 "timestamp": self.latest_state["timestamp"],
                 "cameras": list(self.latest_state["cameras"]),
                 "camera_positions": list(self.latest_state["camera_positions"]),
+                "camera_orientations": list(self.latest_state["camera_orientations"]),
+                "camera_look_at_target": self.latest_state["camera_look_at_target"],
                 "path_history": list(self.latest_state["path_history"]),
                 "current_point": self.latest_state["current_point"],
                 "message": self.latest_state["message"],

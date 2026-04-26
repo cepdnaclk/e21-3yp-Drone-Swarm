@@ -123,7 +123,10 @@ function makeCameraMarker(labelText) {
     new THREE.ConeGeometry(0.16, 0.48, 6),
     new THREE.MeshStandardMaterial({ color: 0x56d4ff, emissive: 0x144b5f, emissiveIntensity: 0.9 })
   );
-  cone.rotation.x = Math.PI;
+  // Make the cone point along the group's local +Z axis.
+  cone.rotation.x = Math.PI / 2;
+  // Put the cone tip at the group origin so the tip marks the camera position.
+  cone.position.set(0, 0, -0.24);
   group.add(cone);
 
   const sprite = new THREE.Sprite(
@@ -134,6 +137,10 @@ function makeCameraMarker(labelText) {
   group.add(sprite);
 
   return group;
+}
+
+function mapDirection(vector) {
+  return new THREE.Vector3(vector[0], vector[2], vector[1]);
 }
 
 function setStatus(status) {
@@ -184,7 +191,7 @@ function updateTrail(pathHistory) {
   glowPoint.visible = true;
 }
 
-function updateCameraMarkers(cameraPositions) {
+function updateCameraMarkers(cameraPositions, cameraOrientations) {
   while (cameraMarkerGroup.children.length) {
     const child = cameraMarkerGroup.children[0];
     cameraMarkerGroup.remove(child);
@@ -193,6 +200,14 @@ function updateCameraMarkers(cameraPositions) {
   (cameraPositions || []).forEach((cameraPosition, index) => {
     const marker = makeCameraMarker(`Cam ${index + 1}`);
     marker.position.copy(mapPoint(cameraPosition));
+    const orientation = cameraOrientations?.[index];
+    if (orientation?.forward && orientation?.up && orientation?.right) {
+      const right = mapDirection(orientation.right).normalize();
+      const forward = mapDirection(orientation.forward).normalize();
+      const up = mapDirection(orientation.up).normalize();
+      const basis = new THREE.Matrix4().makeBasis(right, up, forward);
+      marker.quaternion.setFromRotationMatrix(basis);
+    }
     cameraMarkerGroup.add(marker);
   });
 }
@@ -240,14 +255,14 @@ async function pollState() {
     messageText.textContent = state.message || "Tracker connected";
     updateCoordinates(state.current_point);
     updateCameraBadges(state.cameras);
-    updateCameraMarkers(state.camera_positions);
+    updateCameraMarkers(state.camera_positions, state.camera_orientations);
     updateTrail(state.path_history || []);
   } catch (_error) {
     setStatus("error");
     messageText.textContent = "Backend unavailable";
     updateCoordinates(null);
     updateCameraBadges([]);
-    updateCameraMarkers([]);
+    updateCameraMarkers([], []);
     updateTrail([]);
   }
 }

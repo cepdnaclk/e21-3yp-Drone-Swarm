@@ -5,6 +5,13 @@ const User = require("../../models/User");
 
 const router = express.Router();
 
+function parseAdminEmails() {
+    return String(process.env.ADMIN_EMAILS || "")
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean);
+}
+
 router.post("/register", async (req, res) => {
     try {
         const { name, email, phone, password } = req.body;
@@ -81,8 +88,18 @@ router.post("/login", async (req, res) => {
             });
         }
 
+        const isAdmin = parseAdminEmails().includes(user.email.toLowerCase());
+        const scopes = isAdmin
+            ? ["projects:read", "projects:write", "gateway:proxy", "admin:verify-user"]
+            : ["projects:read", "gateway:proxy"];
+
         const token = jwt.sign(
-            { sub: user._id.toString(), email: user.email },
+            {
+                sub: user._id.toString(),
+                email: user.email,
+                isAdmin,
+                scopes,
+            },
             process.env.JWT_SECRET || "dev_jwt_secret_change_me",
             { expiresIn: "7d" }
         );

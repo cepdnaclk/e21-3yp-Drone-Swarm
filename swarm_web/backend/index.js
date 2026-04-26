@@ -4,6 +4,7 @@ const { config } = require("dotenv");
 const userRoutes = require("./routes/user/userRoutes");
 const adminRoutes = require("./routes/admin/adminRoutes");
 const projectRoutes = require("./routes/project/projectRoutes");
+const gatewayRoutes = require("./routes/gateway/gatewayRoutes");
 
 
 config();
@@ -28,6 +29,7 @@ app.use(express.json());
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/projects", projectRoutes);
+app.use("/api/gateway", gatewayRoutes);
 
 app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true, service: "backend" });

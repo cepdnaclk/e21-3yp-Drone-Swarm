@@ -23,6 +23,31 @@ const projectSchema = new mongoose.Schema(
             trim: true,
             default: "",
         },
+        service: {
+            internalBaseUrl: {
+                type: String,
+                trim: true,
+                default: "",
+            },
+            healthPath: {
+                type: String,
+                trim: true,
+                default: "/health",
+            },
+            enabled: {
+                type: Boolean,
+                default: true,
+            },
+            authMode: {
+                type: String,
+                enum: ["none", "service-token"],
+                default: "service-token",
+            },
+            requiredScopes: {
+                type: [String],
+                default: [],
+            },
+        },
         status: {
             type: String,
             enum: ["active", "online", "maintenance", "offline"],

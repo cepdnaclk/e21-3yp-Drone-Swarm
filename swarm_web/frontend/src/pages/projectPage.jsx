@@ -24,7 +24,14 @@ function ProjectPage({ onLogout }) {
             setError("");
 
             try {
-                const response = await fetch(`${apiBase}/projects`);
+                const token = localStorage.getItem("authToken");
+                const response = await fetch(`${apiBase}/projects`, {
+                    headers: token
+                        ? {
+                            Authorization: `Bearer ${token}`,
+                        }
+                        : {},
+                });
                 const data = await response.json();
 
                 if (!response.ok) {

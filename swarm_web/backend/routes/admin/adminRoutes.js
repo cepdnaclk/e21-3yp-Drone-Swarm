@@ -1,22 +1,11 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const User = require("../../models/User");
+const { requireAdminAccess } = require("../../middleware/auth");
 
 const router = express.Router();
 
-router.use((req, res, next) => {
-    const adminSecret = process.env.ADMIN_SECRET;
-
-    // If ADMIN_SECRET is set, requests must include x-admin-secret.
-    if (adminSecret && req.header("x-admin-secret") !== adminSecret) {
-        return res.status(401).json({
-            ok: false,
-            message: "Unauthorized admin request.",
-        });
-    }
-
-    return next();
-});
+router.use(requireAdminAccess);
 
 router.patch("/verify-user", async (req, res) => {
     try {

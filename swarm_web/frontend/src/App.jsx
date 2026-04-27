@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
+import "./App.css";
+
 import LoginPage from "./pages/login.jsx";
 import ProjectPage from "./pages/projectPage.jsx";
 
@@ -44,8 +46,12 @@ function App() {
 
     if (loading) {
         return (
-            <div style={{ display: "flex", justifyContent: "center", padding: 50 }}>
-                Loading PeraSwarm Console...
+            <div className="loading-screen">
+                <div className="loading-card">
+                    <div className="eyebrow">PeraSwarm Console</div>
+                    <div className="auth-heading">Loading secure workspace</div>
+                    <p className="auth-copy">Preparing the control surface and validating session access.</p>
+                </div>
             </div>
         );
     }

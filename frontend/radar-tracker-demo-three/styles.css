@@ -1,13 +1,13 @@
 :root {
-  --bg: #08131f;
-  --panel: rgba(10, 24, 39, 0.82);
-  --panel-border: rgba(153, 214, 255, 0.14);
-  --text: #e9f4ff;
-  --muted: #8ba8c2;
-  --accent-2: #8cff9e;
+  --bg: #071018;
+  --panel: rgba(9, 21, 34, 0.82);
+  --panel-border: rgba(146, 208, 255, 0.15);
+  --text: #edf6ff;
+  --muted: #8ea6bc;
+  --accent-2: #84f5a6;
   --warning: #ffbf69;
   --danger: #ff6b6b;
-  --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+  --shadow: 0 28px 90px rgba(0, 0, 0, 0.36);
 }
 
 * {
@@ -20,14 +20,44 @@ body {
   font-family: "Space Grotesk", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(86, 212, 255, 0.15), transparent 30%),
-    linear-gradient(180deg, #071019 0%, #0c1825 55%, #08131f 100%);
+    radial-gradient(circle at top left, rgba(95, 215, 255, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(132, 245, 166, 0.12), transparent 24%),
+    linear-gradient(180deg, #061019 0%, #0b1622 55%, #071018 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.78), transparent);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2.2rem, 3.2vw, 3.8rem);
+  line-height: 0.94;
+  letter-spacing: -0.04em;
+}
+
+h2 {
+  font-size: 1.12rem;
+  letter-spacing: -0.02em;
 }
 
 .dashboard {
-  width: min(1240px, calc(100vw - 40px));
+  width: min(1460px, calc(100vw - 40px));
   margin: 0 auto;
-  padding: 28px 0 40px;
+  padding: 30px 0 42px;
 }
 
 .hero,
@@ -41,7 +71,7 @@ body {
 }
 
 .hero {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 
 .eyebrow,
@@ -60,21 +90,6 @@ body {
   color: var(--muted);
 }
 
-h1,
-h2,
-p {
-  margin: 0;
-}
-
-h1 {
-  font-size: clamp(2rem, 3vw, 3.3rem);
-  line-height: 0.95;
-}
-
-h2 {
-  font-size: 1.15rem;
-}
-
 .status-panel,
 .panel {
   background: var(--panel);
@@ -85,8 +100,12 @@ h2 {
 
 .status-panel {
   padding: 16px 18px;
-  border-radius: 18px;
+  border-radius: 20px;
   min-width: 220px;
+}
+
+.status-panel strong {
+  font-size: 1rem;
 }
 
 .status-dot {
@@ -110,46 +129,35 @@ h2 {
 
 .layout-grid {
   display: grid;
-  gap: 22px;
+  gap: 24px;
 }
 
 .panel {
-  border-radius: 26px;
-  padding: 22px;
+  border-radius: 28px;
+  padding: 24px;
 }
 
-.coords {
-  flex-wrap: wrap;
-  color: var(--muted);
-  font-size: 0.94rem;
-}
-
-.coords strong {
-  color: var(--text);
+#webcamFeed,
+.scene-host {
+  width: 100%;
+  margin-top: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(146, 208, 255, 0.1);
+  background:
+    radial-gradient(circle at top, rgba(95, 215, 255, 0.11), transparent 42%),
+    linear-gradient(180deg, rgba(9, 23, 37, 0.92), rgba(4, 11, 18, 0.98));
 }
 
 #webcamFeed {
+  min-height: 320px;
+  object-fit: cover;
   display: block;
-  width: 100%;
-  margin-top: 18px;
-  border-radius: 22px;
-  border: 1px solid rgba(153, 214, 255, 0.1);
-  background:
-    radial-gradient(circle at top, rgba(86, 212, 255, 0.1), transparent 42%),
-    linear-gradient(180deg, rgba(9, 23, 37, 0.9), rgba(4, 12, 20, 0.96));
 }
 
 .scene-host {
-  width: 100%;
-  height: min(60vw, 620px);
-  min-height: 360px;
-  margin-top: 18px;
-  border-radius: 22px;
-  border: 1px solid rgba(153, 214, 255, 0.1);
+  height: min(56vw, 620px);
+  min-height: 400px;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top, rgba(86, 212, 255, 0.08), transparent 42%),
-    linear-gradient(180deg, rgba(9, 23, 37, 0.95), rgba(4, 12, 20, 0.98));
 }
 
 .scene-host canvas {
@@ -163,9 +171,20 @@ h2 {
   font-size: 0.9rem;
 }
 
+.coords {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.coords strong {
+  color: var(--text);
+}
+
 @media (max-width: 860px) {
   .dashboard {
-    width: min(100vw - 20px, 1240px);
+    width: min(100vw - 20px, 1460px);
     padding-top: 18px;
   }
 
@@ -177,5 +196,13 @@ h2 {
 
   .status-panel {
     width: 100%;
+  }
+
+  .panel {
+    padding: 20px;
+  }
+
+  .scene-host {
+    min-height: 360px;
   }
 }

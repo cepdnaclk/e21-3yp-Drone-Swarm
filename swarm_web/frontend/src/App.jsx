@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import LoginPage from "./pages/login.jsx";
 import ProjectPage from "./pages/projectPage.jsx";
+import "./pages/app-shell.css";
 
 function App() {
   return (

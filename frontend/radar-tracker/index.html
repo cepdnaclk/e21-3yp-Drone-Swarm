@@ -12,15 +12,35 @@
 <body>
   <main class="dashboard">
     <section class="hero">
-      <div>
-        <p class="eyebrow">Localization</p>
-        <h1>Live Tracker</h1>
+      <div class="hero-copy">
+        <p class="eyebrow">Localization control room</p>
+        <h1>Live tracker</h1>
+        <p class="hero-text">Monitor camera lock state, 3D reconstruction and live coordinates from a single operator view.</p>
       </div>
+
+      <div class="hero-metrics">
+        <article class="metric-card">
+          <span class="metric-value">4</span>
+          <span class="metric-label">Camera nodes</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-value">250ms</span>
+          <span class="metric-label">Polling cycle</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-value">3D</span>
+          <span class="metric-label">Live grid view</span>
+        </article>
+      </div>
+
       <div class="status-panel">
-        <span id="statusDot" class="status-dot status-waiting"></span>
-        <div>
+        <div class="status-panel__head">
           <p class="status-label">System Status</p>
           <strong id="statusText">Connecting</strong>
+        </div>
+        <div class="status-panel__indicator">
+          <span id="statusDot" class="status-dot status-waiting"></span>
+          <span class="status-note">Realtime telemetry channel</span>
         </div>
       </div>
     </section>
@@ -62,9 +82,9 @@
             <h2>3D Grid Tracker</h2>
           </div>
           <div class="coords">
-            <span>X <strong id="coord-x">--</strong></span>
-            <span>Y <strong id="coord-y">--</strong></span>
-            <span>Z <strong id="coord-z">--</strong></span>
+            <span><small>X axis</small><strong id="coord-x">--</strong></span>
+            <span><small>Y axis</small><strong id="coord-y">--</strong></span>
+            <span><small>Z axis</small><strong id="coord-z">--</strong></span>
           </div>
         </div>
 

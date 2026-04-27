@@ -1,55 +1,110 @@
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+
 import LoginPage from "./pages/login.jsx";
 import ProjectPage from "./pages/projectPage.jsx";
 
-function App() {
-  return (
-    <Routes>
-      <Route path="/" element={<HomeRedirect />} />
-      <Route path="/login" element={<LoginRoute />} />
-      <Route path="/projects" element={<ProjectsRoute />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-  );
-}
+const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-function HomeRedirect() {
-  const token = localStorage.getItem("authToken");
-  return <Navigate to={token ? "/projects" : "/login"} replace />;
-}
+/* 🔐 AUTH CHECK HOOK */
+function useAuth() {
+    const [loading, setLoading] = useState(true);
+    const [isAuth, setIsAuth] = useState(false);
 
-function LoginRoute() {
-  const navigate = useNavigate();
-  const token = localStorage.getItem("authToken");
-
-  if (token) {
-    return <Navigate to="/projects" replace />;
-  }
-
-  function handleLoginSuccess(nextToken) {
-    if (nextToken) {
-      localStorage.setItem("authToken", nextToken);
-      navigate("/projects", { replace: true });
+    // 1. Pulled this out so we can call it manually after login/logout
+    async function checkAuth() {
+        setLoading(true);
+        try {
+            const res = await fetch(`${apiBase}/auth/me`, {
+                method: "GET",
+                credentials: "include",
+            });
+            
+            const data = await res.json();
+            
+            // 2. We now check for the user object instead of res.ok
+            setIsAuth(!!data.user); 
+        } catch {
+            setIsAuth(false);
+        } finally {
+            setLoading(false);
+        }
     }
-  }
 
-  return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+    useEffect(() => {
+        checkAuth();
+    }, []);
+
+    // 3. Return checkAuth so the app can trigger it
+    return { loading, isAuth, checkAuth }; 
 }
 
-function ProjectsRoute() {
-  const navigate = useNavigate();
-  const token = localStorage.getItem("authToken");
+function App() {
+    const { loading, isAuth, checkAuth } = useAuth();
 
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
+    if (loading) {
+        return (
+            <div style={{ display: "flex", justifyContent: "center", padding: 50 }}>
+                Loading PeraSwarm Console...
+            </div>
+        );
+    }
 
-  function handleLogout() {
-    localStorage.removeItem("authToken");
-    navigate("/login", { replace: true });
-  }
+    return (
+        <Routes>
+            <Route path="/" element={<HomeRedirect isAuth={isAuth} />} />
+            {/* 4. Pass checkAuth to the routes that change auth state */}
+            <Route path="/login" element={<LoginRoute isAuth={isAuth} revalidateAuth={checkAuth} />} />
+            <Route path="/projects" element={<ProjectsRoute isAuth={isAuth} revalidateAuth={checkAuth} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+    );
+}
 
-  return <ProjectPage onLogout={handleLogout} />;
+/* 🚀 HOME ROUTE */
+function HomeRedirect({ isAuth }) {
+    return <Navigate to={isAuth ? "/projects" : "/login"} replace />;
+}
+
+/* 🔑 LOGIN ROUTE */
+function LoginRoute({ isAuth, revalidateAuth }) {
+    const navigate = useNavigate();
+
+    if (isAuth) {
+        return <Navigate to="/projects" replace />;
+    }
+
+    async function handleLoginSuccess() {
+        // 5. Update the global auth state BEFORE navigating
+        await revalidateAuth(); 
+        navigate("/projects", { replace: true });
+    }
+
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+}
+
+/* 📁 PROJECT ROUTE */
+function ProjectsRoute({ isAuth, revalidateAuth }) {
+    const navigate = useNavigate();
+
+    if (!isAuth) {
+        return <Navigate to="/login" replace />;
+    }
+
+    async function handleLogout() {
+        try {
+            await fetch(`${apiBase}/auth/logout`, {
+                method: "POST",
+                credentials: "include",
+            });
+        } finally {
+            // 6. Clear global auth state and push to login
+            await revalidateAuth();
+            navigate("/login", { replace: true });
+        }
+    }
+
+    return <ProjectPage onLogout={handleLogout} />;
 }
 
 export default App;

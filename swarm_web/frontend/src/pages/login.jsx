@@ -34,7 +34,9 @@ function LoginPage({ onLoginSuccess }) {
                 throw new Error("Passwords do not match.");
             }
 
-            const endpoint = mode === "login" ? "/users/login" : "/users/register";
+            const endpoint =
+                mode === "login" ? "/users/login" : "/users/register";
+
             const payload =
                 mode === "login"
                     ? { email, password }
@@ -43,21 +45,22 @@ function LoginPage({ onLoginSuccess }) {
             const response = await fetch(`${apiBase}${endpoint}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                credentials: "include", // 🔥 IMPORTANT (cookie auth)
                 body: JSON.stringify(payload),
             });
 
             const data = await response.json();
+
             if (!response.ok) {
                 throw new Error(data.message || "Request failed");
             }
 
             if (mode === "login") {
-                if (data.token) {
-                    localStorage.setItem("authToken", data.token);
-                }
                 setMessage("Login successful.");
+
+                // no token handling anymore
                 if (typeof onLoginSuccess === "function") {
-                    onLoginSuccess(data.token || "");
+                    onLoginSuccess();
                 }
             } else {
                 setMessage(data.message || "Registration successful.");
@@ -84,6 +87,7 @@ function LoginPage({ onLoginSuccess }) {
                 color: "#111827",
             }}
         >
+            {/* LEFT PANEL */}
             <div
                 style={{
                     background: "linear-gradient(180deg, #fafaf9 0%, #f2f2ef 100%)",
@@ -91,13 +95,11 @@ function LoginPage({ onLoginSuccess }) {
                     padding: "40px 56px",
                     display: "flex",
                     flexDirection: "column",
-                    position: "relative",
-                    overflow: "hidden",
                 }}
             >
                 <PeraSwarmMark size={26} />
 
-                <div style={{ flex: 1, display: "flex", alignItems: "center", marginTop: 40 }}>
+                <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
                     <div>
                         <div
                             style={{
@@ -111,47 +113,27 @@ function LoginPage({ onLoginSuccess }) {
                         >
                             Remote swarm robotics · University of Peradeniya
                         </div>
+
                         <h1
                             style={{
                                 fontSize: 42,
                                 lineHeight: 1.08,
-                                letterSpacing: "-0.02em",
                                 fontWeight: 600,
                                 margin: "0 0 20px",
-                                maxWidth: 520,
                                 color: "#151718",
                             }}
                         >
                             One framework. Every robot in the lab.
                         </h1>
-                        <p
-                            style={{
-                                fontSize: 15,
-                                lineHeight: 1.55,
-                                color: "#555955",
-                                maxWidth: 460,
-                                margin: 0,
-                            }}
-                        >
-                            Control drones, ground robots and mixed-reality agents from a
-                            single browser. Author behaviours visually, run them remotely,
-                            study the swarm.
+
+                        <p style={{ fontSize: 15, color: "#555955" }}>
+                            Control drones, ground robots and AI agents from a single browser.
                         </p>
                     </div>
                 </div>
-
-                <div
-                    style={{
-                        fontSize: 11.5,
-                        color: "#8e918d",
-                        zIndex: 2,
-                        letterSpacing: "0.04em",
-                    }}
-                >
-                    v0.3.1 · build 2304-a · swarm-core.pera.lk
-                </div>
             </div>
 
+            {/* RIGHT PANEL */}
             <div
                 style={{
                     display: "flex",
@@ -161,7 +143,10 @@ function LoginPage({ onLoginSuccess }) {
                     background: "#ffffff",
                 }}
             >
-                <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 380, color: "#111827" }}>
+                <form
+                    onSubmit={handleSubmit}
+                    style={{ width: "100%", maxWidth: 380 }}
+                >
                     <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
                         <button
                             type="button"
@@ -179,34 +164,15 @@ function LoginPage({ onLoginSuccess }) {
                         </button>
                     </div>
 
-                    <div
-                        style={{
-                            fontSize: 11,
-                            letterSpacing: "0.1em",
-                            color: "#6f726e",
-                            textTransform: "uppercase",
-                            fontWeight: 600,
-                            marginBottom: 8,
-                        }}
-                    >
-                        {mode === "login" ? "Sign in" : "Sign up"}
-                    </div>
-                    <h2
-                        style={{
-                            fontSize: 24,
-                            fontWeight: 600,
-                            letterSpacing: "-0.01em",
-                            margin: "0 0 6px",
-                            color: "#111827",
-                        }}
-                    >
+                    <h2 style={{ fontSize: 24, marginBottom: 6 }}>
                         {pageTitle}
                     </h2>
-                    <p style={{ color: "#374151", margin: "0 0 24px", fontSize: 13.5 }}>
+
+                    <p style={{ fontSize: 13, marginBottom: 24, color: "#374151" }}>
                         {pageText}
                     </p>
 
-                    {mode === "register" ? (
+                    {mode === "register" && (
                         <div style={{ marginBottom: 12 }}>
                             <label style={labelStyle}>Name</label>
                             <input
@@ -216,22 +182,19 @@ function LoginPage({ onLoginSuccess }) {
                                 required
                             />
                         </div>
-                    ) : null}
+                    )}
 
-                    <div style={{ marginBottom: 18 }}>
+                    <div style={{ marginBottom: 12 }}>
                         <label style={labelStyle}>Email</label>
                         <input
                             style={inputStyle}
-                            type="text"
-                            inputMode="email"
-                            autoComplete="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             required
                         />
                     </div>
 
-                    {mode === "register" ? (
+                    {mode === "register" && (
                         <div style={{ marginBottom: 12 }}>
                             <label style={labelStyle}>Phone</label>
                             <input
@@ -241,156 +204,113 @@ function LoginPage({ onLoginSuccess }) {
                                 required
                             />
                         </div>
-                    ) : null}
+                    )}
 
-                    <div style={{ marginBottom: 18 }}>
+                    <div style={{ marginBottom: 12 }}>
                         <label style={labelStyle}>Password</label>
                         <input
-                            style={inputStyle}
                             type="password"
+                            style={inputStyle}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
                         />
                     </div>
 
-                    {mode === "register" ? (
-                        <div style={{ marginBottom: 18 }}>
+                    {mode === "register" && (
+                        <div style={{ marginBottom: 12 }}>
                             <label style={labelStyle}>Confirm Password</label>
                             <input
-                                style={inputStyle}
                                 type="password"
+                                style={inputStyle}
                                 value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                onChange={(e) =>
+                                    setConfirmPassword(e.target.value)
+                                }
                                 required
                             />
                         </div>
-                    ) : null}
+                    )}
 
-                    {message ? (
-                        <div style={successStyle}>{message}</div>
-                    ) : null}
-                    {error ? <div style={errorStyle}>{error}</div> : null}
+                    {message && <div style={successStyle}>{message}</div>}
+                    {error && <div style={errorStyle}>{error}</div>}
 
                     <button
-                        style={submitButtonStyle}
                         type="submit"
                         disabled={loading}
+                        style={submitButtonStyle}
                     >
                         {loading
                             ? "Please wait..."
                             : mode === "login"
-                                ? "Enter Swarm Console"
-                                : "Create account"}
+                            ? "Enter Swarm Console"
+                            : "Create account"}
                     </button>
                 </form>
             </div>
-
-            <style>{`
-				@media (max-width: 900px) {
-					div[data-login-root="true"] {
-						grid-template-columns: 1fr;
-                        width: 100%;
-                        margin-left: 0;
-					}
-				}
-			`}</style>
         </div>
     );
 }
 
+/* UI helpers */
 function PeraSwarmMark({ size = 26 }) {
     return (
-        <div
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                color: "#131516",
-                fontWeight: 700,
-            }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
                 style={{
                     width: size,
                     height: size,
                     borderRadius: 7,
-                    background: "linear-gradient(135deg, #111 0%, #3a5fbd 100%)",
+                    background: "linear-gradient(135deg, #111, #3a5fbd)",
                 }}
             />
-            <span style={{ fontSize: 16 }}>PeraSwarm</span>
+            <strong>PeraSwarm</strong>
         </div>
     );
 }
 
 function tabButton(active) {
     return {
-        border: "1px solid #d6d7d1",
-        background: active ? "#111" : "#fff",
-        color: active ? "#fff" : "#222",
-        fontSize: 12,
-        fontWeight: 600,
-        borderRadius: 9,
         padding: "8px 14px",
+        borderRadius: 8,
+        border: "1px solid #ccc",
+        background: active ? "#111" : "#fff",
+        color: active ? "#fff" : "#000",
         cursor: "pointer",
     };
 }
 
-const labelStyle = {
-    display: "block",
-    fontSize: 12,
-    color: "#1f2937",
-    marginBottom: 6,
-    fontWeight: 600,
-};
-
+const labelStyle = { fontSize: 12, fontWeight: 600, marginBottom: 6 };
 const inputStyle = {
-    display: "block",
     width: "100%",
-    minWidth: "100%",
-    height: 40,
-    boxSizing: "border-box",
-    appearance: "none",
-    WebkitAppearance: "none",
-    border: "1px solid #cbd5e1",
-    background: "#ffffff",
-    color: "#111827",
-    borderRadius: 10,
-    padding: "0 12px",
-    fontSize: 14,
-    outline: "none",
+    padding: "10px",
+    borderRadius: 8,
+    border: "1px solid #ccc",
 };
 
 const submitButtonStyle = {
     width: "100%",
-    height: 42,
-    border: "none",
-    borderRadius: 10,
+    padding: "10px",
+    borderRadius: 8,
     background: "#1d4ed8",
     color: "#fff",
-    fontSize: 14,
+    border: "none",
     fontWeight: 600,
     cursor: "pointer",
 };
 
 const successStyle = {
-    marginBottom: 12,
-    fontSize: 12.5,
-    color: "#0a7f2e",
-    background: "#edfaef",
-    border: "1px solid #bee8c6",
-    borderRadius: 8,
-    padding: "8px 10px",
+    padding: 8,
+    background: "#e6ffed",
+    border: "1px solid #b7ebc6",
+    marginBottom: 10,
 };
 
 const errorStyle = {
-    marginBottom: 12,
-    fontSize: 12.5,
-    color: "#9f1239",
-    background: "#fff1f2",
-    border: "1px solid #fecdd3",
-    borderRadius: 8,
-    padding: "8px 10px",
+    padding: 8,
+    background: "#ffe6e6",
+    border: "1px solid #ffb3b3",
+    marginBottom: 10,
 };
 
 export default LoginPage;

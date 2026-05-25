@@ -45,7 +45,7 @@ def load_intrinsics(cam):
 
     filename = os.path.join(
         BASE_DIR,
-        f"camera_{cam_num}_params.json"
+        f"camera_{cam_num}_params_test.json"
     )
 
     with open(filename, "r") as f:

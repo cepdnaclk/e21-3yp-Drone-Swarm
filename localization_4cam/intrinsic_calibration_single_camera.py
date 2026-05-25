@@ -8,7 +8,7 @@ CHECKERBOARD = (9, 6)
 SQUARE_SIZE = 23.9
 
 CAMERA_INDEX = 1
-CAMERA_NUMBER = 1
+CAMERA_NUMBER = 4
 
 WIDTH = 640
 HEIGHT = 480
@@ -208,7 +208,7 @@ def calibrate_intrinsics():
 
     output_path = os.path.join(
         BASE_DIR,
-        f"camera_{CAMERA_NUMBER}_params.json"
+        f"camera_{CAMERA_NUMBER}_params_new.json"
     )
 
     data = {

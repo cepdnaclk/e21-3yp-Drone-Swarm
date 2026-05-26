@@ -13,6 +13,10 @@
 
 // Failsafe: if no valid command arrives, disarm and zero throttle.
 #define FAILSAFE_MS 500
+
+// Set to 1 only when debugging with a serial monitor.
+// Printing every received packet can add latency/jitter.
+#define DEBUG_RX_PRINT 0
 // =================================================
 
 HardwareSerial CRSFSerial(1);
@@ -97,12 +101,14 @@ void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int 
   lastRecvTime = millis();
   applyCommandToChannels(lastCmd);
 
+#if DEBUG_RX_PRINT
   Serial.print("RX seq="); Serial.print(lastCmd.seq);
   Serial.print(" arm="); Serial.print(lastCmd.armed);
   Serial.print(" T="); Serial.print(lastCmd.throttle_us);
   Serial.print(" R="); Serial.print(lastCmd.roll_us);
   Serial.print(" P="); Serial.print(lastCmd.pitch_us);
   Serial.print(" Y="); Serial.println(lastCmd.yaw_us);
+#endif
 }
 
 void setup() {

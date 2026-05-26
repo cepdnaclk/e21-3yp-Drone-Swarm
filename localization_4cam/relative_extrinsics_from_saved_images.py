@@ -45,7 +45,7 @@ def load_intrinsics(cam):
 
     filename = os.path.join(
         BASE_DIR,
-        f"camera_{cam_num}_params.json"
+        f"camera_{cam_num}_params_new.json"
     )
 
     with open(filename, "r") as f:
@@ -122,24 +122,18 @@ def invert_pose(R, t):
     return R_inv, t_inv
 
 
-def relative_pose_from_ref_to_cam(R_ref, t_ref, R_cam, t_cam):
+def camera_position_in_ref_frame(R_ref, t_ref, R_cam, t_cam):
     """
     solvePnP gives:
-        X_camera = R * X_checkerboard + t
+        X_camera = R * X_board + t
 
-    This computes:
-        X_cam = R_rel * X_ref + t_rel
-
-    So t_rel is the position of cam reference origin
-    expressed in current camera coordinates.
+    This returns the position of cam in reference camera coordinates.
     """
 
-    R_ref_inv, t_ref_inv = invert_pose(R_ref, t_ref)
+    R_ref_cam = R_ref @ R_cam.T
+    t_ref_cam = t_ref - R_ref @ R_cam.T @ t_cam
 
-    R_rel = R_cam @ R_ref_inv
-    t_rel = t_cam + R_cam @ t_ref_inv
-
-    return R_rel, t_rel
+    return R_ref_cam, t_ref_cam
 
 # =========================
 # SET FINDING
@@ -263,7 +257,7 @@ def compute_relative_extrinsics_from_saved_images():
 
             R_cam, t_cam = poses[cam]
 
-            R_rel, t_rel = relative_pose_from_ref_to_cam(
+            R_rel, t_rel = camera_position_in_ref_frame(
                 R_ref,
                 t_ref,
                 R_cam,

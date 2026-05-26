@@ -21,6 +21,7 @@ Run example:
 import argparse
 import sys
 import time
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -37,6 +38,7 @@ THROTTLE_STEP = 25
 TAKEOFF_TARGET = 1080
 TAKEOFF_DURATION_MS = 1000
 TAKEOFF_INTERVAL_MS = 50
+STATUS_HZ = 10
 
 class DroneController:
     def __init__(self, root, port):
@@ -51,9 +53,12 @@ class DroneController:
         self.yaw = 1500
         self.armed = 0
         self.last_sent = ""
+        self._last_status_ts = 0.0
         self._updating_ui = False
         self._ui_ready = False
         self.takeoff_job = None
+        self._stop_reader = threading.Event()
+        self._reader_thread = None
 
         self.connect_serial()
         self.build_ui()
@@ -63,11 +68,33 @@ class DroneController:
 
     def connect_serial(self):
         try:
-            self.ser = serial.Serial(self.port_name, BAUD, timeout=0.02)
+            # Use a small write timeout so UI can't freeze if the COM port stalls.
+            self.ser = serial.Serial(self.port_name, BAUD, timeout=0.02, write_timeout=0.05)
             time.sleep(2.0)  # ESP32 resets when serial opens
+            try:
+                self.ser.reset_input_buffer()
+                self.ser.reset_output_buffer()
+            except Exception:
+                pass
+
+            # Drain any incoming serial output from the ESP32 (if any) so it can't
+            # build up and slow the device / USB CDC link.
+            self._reader_thread = threading.Thread(target=self._serial_reader, daemon=True)
+            self._reader_thread.start()
         except Exception as e:
             messagebox.showerror("Serial error", f"Could not open {self.port_name}\n\n{e}")
             raise
+
+    def _serial_reader(self):
+        while not self._stop_reader.is_set():
+            try:
+                if not self.ser or not self.ser.is_open:
+                    return
+                data = self.ser.read(256)
+                if not data:
+                    time.sleep(0.01)
+            except Exception:
+                return
 
     def build_ui(self):
         main = ttk.Frame(self.root, padding=15)
@@ -127,6 +154,7 @@ class DroneController:
         if not self.armed:
             self.throttle = 1000
         self.update_sliders()
+        self.send_command(force=True)
 
     def update_sliders(self):
         self._updating_ui = True
@@ -183,6 +211,7 @@ class DroneController:
         if not self.armed:
             self.throttle = 1000
         self.update_sliders()
+        self.send_command(force=True)
 
     def toggle_arm(self):
         self.cancel_takeoff()
@@ -196,6 +225,7 @@ class DroneController:
             self.armed = 1
         self.arm_button.config(text=f"ARM: {'ON' if self.armed else 'OFF'}")
         self.update_sliders()
+        self.send_command(force=True)
 
     def start_takeoff(self):
         if not self.armed:
@@ -254,9 +284,20 @@ class DroneController:
             if self.ser and self.ser.is_open:
                 self.ser.write(line.encode("ascii"))
                 self.last_sent = line.strip()
-                self.status.set(f"Sent: {self.last_sent}")
+                now = time.monotonic()
+                if force or (now - self._last_status_ts) >= (1.0 / STATUS_HZ):
+                    self.status.set(f"Sent: {self.last_sent}")
+                    self._last_status_ts = now
+        except getattr(serial, "SerialTimeoutException", Exception) as e:
+            now = time.monotonic()
+            if force or (now - self._last_status_ts) >= (1.0 / STATUS_HZ):
+                self.status.set(f"Serial write timeout (dropped): {e}")
+                self._last_status_ts = now
         except Exception as e:
-            self.status.set(f"Serial send error: {e}")
+            now = time.monotonic()
+            if force or (now - self._last_status_ts) >= (1.0 / STATUS_HZ):
+                self.status.set(f"Serial send error: {e}")
+                self._last_status_ts = now
 
     def schedule_send(self):
         self.send_command()
@@ -274,6 +315,7 @@ class DroneController:
             if self.ser and self.ser.is_open:
                 self.ser.close()
         finally:
+            self._stop_reader.set()
             self.root.destroy()
 
 

@@ -6,6 +6,10 @@
 uint8_t receiverAddress[] = { 0xC0, 0x4E, 0x30, 0x4B, 0x80, 0x3B };
 #define ESPNOW_CHANNEL 1
 #define SEND_PERIOD_MS 20   // 50 Hz from transmitter to receiver
+// Set to 1 only when debugging with a serial monitor.
+// Printing every command can cause USB-serial backpressure and multi-second control lag
+// if the PC isn't reading the ESP32's serial output.
+#define DEBUG_CMD_PRINT 0
 // =================================================
 
 typedef struct __attribute__((packed)) {
@@ -60,12 +64,14 @@ void parseSerialCommand(String line) {
   // Extra safety: when disarmed, force throttle low.
   if (!cmd.armed) cmd.throttle_us = 1000;
 
+#if DEBUG_CMD_PRINT
   Serial.print("CMD ");
   Serial.print(cmd.throttle_us); Serial.print(',');
   Serial.print(cmd.roll_us); Serial.print(',');
   Serial.print(cmd.pitch_us); Serial.print(',');
   Serial.print(cmd.yaw_us); Serial.print(',');
   Serial.println(cmd.armed);
+#endif
 }
 
 // Compatible callback for newer ESP32 Arduino core.

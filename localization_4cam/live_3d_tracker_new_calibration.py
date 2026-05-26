@@ -10,7 +10,7 @@ from itertools import combinations
 # SETTINGS
 # =========================
 
-CAMERA_INDICES = [1, 2, 3, 4]
+CAMERA_INDICES = [0, 2, 3, 4]
 CAMERA_NAMES = ["cam1", "cam2", "cam3", "cam4"]
 
 CAM_WIDTH = 640

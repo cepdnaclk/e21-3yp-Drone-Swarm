@@ -24,8 +24,11 @@ MAX_BLOB_AREA = 5000
 
 USE_GRAYSCALE = True
 
-# If your output is in mm, set this True to display meters
 DISPLAY_IN_METERS = True
+
+SHOW_CAM1_COORDS_TOO = True
+
+WORLD_TRANSFORM_FILE = "cam1_to_world_transform.npz"
 
 
 # =========================
@@ -43,7 +46,6 @@ class ThreadedCamera:
         self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
 
         # Optional fixed exposure settings.
-        # These may or may not work depending on webcam driver.
         # Uncomment and tune if needed.
         #
         # self.cap.set(cv.CAP_PROP_AUTO_EXPOSURE, 0.25)
@@ -55,7 +57,11 @@ class ThreadedCamera:
         self.running = True
         self.lock = threading.Lock()
 
-        self.thread = threading.Thread(target=self.update, daemon=True)
+        self.thread = threading.Thread(
+            target=self.update,
+            daemon=True
+        )
+
         self.thread.start()
 
     def update(self):
@@ -92,6 +98,11 @@ def load_intrinsics():
             f"camera_{cam_num}_params_new.json"
         )
 
+        if not os.path.exists(filename):
+            raise FileNotFoundError(
+                f"Missing intrinsic file: {filename}"
+            )
+
         with open(filename, "r") as f:
             data = json.load(f)
 
@@ -105,10 +116,12 @@ def load_intrinsics():
             dtype=np.float64
         )
 
-        intrinsics.append({
-            "K": K,
-            "D": D
-        })
+        intrinsics.append(
+            {
+                "K": K,
+                "D": D
+            }
+        )
 
         print(f"[OK] Loaded camera_{cam_num}_params.json")
 
@@ -117,27 +130,23 @@ def load_intrinsics():
 
 def load_extrinsics():
     """
-    World coordinate system = cam1 coordinate system.
+    Coordinate system before world transform:
+        cam1 coordinate system
 
-    For cam1:
-        camera center C = [0,0,0]
-        camera orientation R_cam_to_world = I
-
-    For cam2/cam3/cam4:
-        load from camX_relative_to_cam1.npz
-
-    Expected saved meaning:
-        R = camera orientation in cam1/world frame
-        t = camera center in cam1/world frame
+    Expected .npz meaning:
+        R = camera orientation in cam1 frame
+        t = camera center position in cam1 frame
     """
 
     extrinsics = []
 
     # cam1 identity
-    extrinsics.append({
-        "R_cam_to_world": np.eye(3, dtype=np.float64),
-        "C_world": np.zeros((3, 1), dtype=np.float64)
-    })
+    extrinsics.append(
+        {
+            "R_cam_to_cam1": np.eye(3, dtype=np.float64),
+            "C_cam1": np.zeros((3, 1), dtype=np.float64)
+        }
+    )
 
     for cam_num in range(2, 5):
         filename = os.path.join(
@@ -145,61 +154,124 @@ def load_extrinsics():
             f"cam{cam_num}_relative_to_cam1.npz"
         )
 
+        if not os.path.exists(filename):
+            raise FileNotFoundError(
+                f"Missing extrinsic file: {filename}"
+            )
+
         data = np.load(filename)
 
-        R_cam_to_world = np.array(
+        R_cam_to_cam1 = np.array(
             data["R"],
             dtype=np.float64
         )
 
-        C_world = np.array(
+        C_cam1 = np.array(
             data["t"],
             dtype=np.float64
         ).reshape(3, 1)
 
-        extrinsics.append({
-            "R_cam_to_world": R_cam_to_world,
-            "C_world": C_world
-        })
+        extrinsics.append(
+            {
+                "R_cam_to_cam1": R_cam_to_cam1,
+                "C_cam1": C_cam1
+            }
+        )
 
         print(f"[OK] Loaded cam{cam_num}_relative_to_cam1.npz")
 
     return extrinsics
 
 
-def build_projection_from_camera_pose(R_cam_to_world, C_world):
+def build_projection_from_camera_pose(R_cam_to_cam1, C_cam1):
     """
-    cv.triangulatePoints needs projection matrix that maps:
+    cv.triangulatePoints needs projection matrix:
 
-        X_world -> X_camera
+        X_cam1 -> X_camera
 
     If:
-        R_cam_to_world = camera orientation in world
-        C_world = camera center in world
+        R_cam_to_cam1 = camera orientation in cam1 frame
+        C_cam1 = camera center in cam1 frame
 
     Then:
-        R_world_to_cam = R_cam_to_world.T
-        t_world_to_cam = -R_world_to_cam @ C_world
+        R_cam1_to_cam = R_cam_to_cam1.T
+        t_cam1_to_cam = -R_cam1_to_cam @ C_cam1
 
-    Since we undistort image points into normalized camera coordinates,
-    projection matrix is:
+    Since we undistort points first, projection matrix is:
 
-        P = [R_world_to_cam | t_world_to_cam]
+        P = [R | t]
 
-    not K @ [R|t].
+    not:
+
+        K @ [R | t]
     """
 
-    R_world_to_cam = R_cam_to_world.T
-    t_world_to_cam = -R_world_to_cam @ C_world
+    R_cam1_to_cam = R_cam_to_cam1.T
+    t_cam1_to_cam = -R_cam1_to_cam @ C_cam1
 
     P = np.hstack(
         (
-            R_world_to_cam,
-            t_world_to_cam
+            R_cam1_to_cam,
+            t_cam1_to_cam
         )
     )
 
     return P
+
+
+def load_world_transform():
+    """
+    Loads transform:
+
+        world_point = scale * R @ cam1_point + t
+
+    File needed:
+        cam1_to_world_transform.npz
+
+    Expected contents:
+        scale
+        R
+        t
+    """
+
+    filename = os.path.join(
+        BASE_DIR,
+        WORLD_TRANSFORM_FILE
+    )
+
+    if not os.path.exists(filename):
+        raise FileNotFoundError(
+            f"Missing world transform file: {filename}"
+        )
+
+    data = np.load(filename)
+
+    scale = float(data["scale"])
+    R = np.array(
+        data["R"],
+        dtype=np.float64
+    )
+
+    t = np.array(
+        data["t"],
+        dtype=np.float64
+    ).reshape(3, 1)
+
+    print(f"[OK] Loaded {WORLD_TRANSFORM_FILE}")
+    print("World scale:", scale)
+
+    return scale, R, t
+
+
+def cam1_to_world(point_cam1, scale, R, t):
+    point_cam1 = np.asarray(
+        point_cam1,
+        dtype=np.float64
+    ).reshape(3, 1)
+
+    point_world = scale * R @ point_cam1 + t
+
+    return point_world.reshape(3)
 
 
 def load_system_data():
@@ -212,15 +284,17 @@ def load_system_data():
 
     for ext in extrinsics:
         P = build_projection_from_camera_pose(
-            ext["R_cam_to_world"],
-            ext["C_world"]
+            ext["R_cam_to_cam1"],
+            ext["C_cam1"]
         )
 
         projections.append(P)
 
-    print("\nCalibration loaded successfully.\n")
+    world_scale, world_R, world_t = load_world_transform()
 
-    return intrinsics, extrinsics, projections
+    print("\nCalibration and world transform loaded successfully.\n")
+
+    return intrinsics, extrinsics, projections, world_scale, world_R, world_t
 
 
 # =========================
@@ -233,16 +307,18 @@ def detect_bright_spot(frame):
     Finds the brightest blob.
 
     Returns:
-        (cx, cy), mask
-        or
-        None, mask
+        point = (cx, cy)
+        mask
     """
 
     if USE_GRAYSCALE:
-        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        gray = cv.cvtColor(
+            frame,
+            cv.COLOR_BGR2GRAY
+        )
+
         detection_img = gray
     else:
-        # Use red channel if your LED appears strongest in red channel
         detection_img = frame[:, :, 2]
 
     blurred = cv.GaussianBlur(
@@ -258,7 +334,10 @@ def detect_bright_spot(frame):
         cv.THRESH_BINARY
     )
 
-    kernel = np.ones((3, 3), np.uint8)
+    kernel = np.ones(
+        (3, 3),
+        np.uint8
+    )
 
     mask = cv.morphologyEx(
         mask,
@@ -309,7 +388,7 @@ def detect_bright_spot(frame):
 
 def undistort_point(pt, K, D):
     """
-    Converts distorted pixel coordinate to normalized camera coordinate.
+    Converts distorted pixel point to normalized camera coordinate.
     """
 
     pts = np.array(
@@ -347,12 +426,12 @@ def triangulate_two_cameras(P1, P2, pt1_norm, pt2_norm):
 
 def triangulate_from_detected_points(detected_points, intrinsics, projections):
     """
-    detected_points:
-        dictionary:
-            cam_index_in_list -> (u, v)
-
     Returns:
-        averaged 3D point in cam1 coordinate system
+        avg_point_cam1:
+            3D point in cam1 coordinate system
+
+        points_3d:
+            pairwise triangulated points
     """
 
     if len(detected_points) < 2:
@@ -399,7 +478,7 @@ def triangulate_from_detected_points(detected_points, intrinsics, projections):
 
 
 # =========================
-# UI
+# UI FUNCTIONS
 # =========================
 
 def draw_camera_view(frame, cam_label, point):
@@ -440,6 +519,7 @@ def draw_camera_view(frame, cam_label, point):
             (0, 255, 0),
             2
         )
+
     else:
         cv.putText(
             frame,
@@ -454,9 +534,9 @@ def draw_camera_view(frame, cam_label, point):
     return frame
 
 
-def format_coordinate_text(point_3d):
+def format_point(point_3d, label):
     if point_3d is None:
-        return "3D: LED not found in at least 2 cameras", (0, 0, 255)
+        return f"{label}: not available"
 
     x, y, z = point_3d
 
@@ -465,11 +545,42 @@ def format_coordinate_text(point_3d):
         y /= 1000.0
         z /= 1000.0
 
-        text = f"X: {x: .3f} m   Y: {y: .3f} m   Z: {z: .3f} m"
-    else:
-        text = f"X: {x: .1f} mm   Y: {y: .1f} mm   Z: {z: .1f} mm"
+        return f"{label} X:{x: .3f}m Y:{y: .3f}m Z:{z: .3f}m"
 
-    return text, (0, 255, 0)
+    return f"{label} X:{x: .1f}mm Y:{y: .1f}mm Z:{z: .1f}mm"
+
+
+def create_grid(frames):
+    display_frames = [
+        cv.resize(
+            frame,
+            (CAM_WIDTH // 2, CAM_HEIGHT // 2)
+        )
+        for frame in frames
+    ]
+
+    top_row = np.hstack(
+        (
+            display_frames[0],
+            display_frames[1]
+        )
+    )
+
+    bottom_row = np.hstack(
+        (
+            display_frames[2],
+            display_frames[3]
+        )
+    )
+
+    grid = np.vstack(
+        (
+            top_row,
+            bottom_row
+        )
+    )
+
+    return grid
 
 
 # =========================
@@ -477,7 +588,7 @@ def format_coordinate_text(point_3d):
 # =========================
 
 def main():
-    intrinsics, extrinsics, projections = load_system_data()
+    intrinsics, extrinsics, projections, world_scale, world_R, world_t = load_system_data()
 
     print("Starting cameras:", CAMERA_INDICES)
 
@@ -488,7 +599,7 @@ def main():
 
     time.sleep(1.0)
 
-    window_name = "Live 3D LED Tracking - New Calibration"
+    window_name = "Live 3D LED Tracking - World Coordinates"
 
     cv.namedWindow(
         window_name,
@@ -502,6 +613,7 @@ def main():
     )
 
     print("\n--- LIVE 3D TRACKING ACTIVE ---")
+    print("Coordinates displayed in WORLD coordinate system")
     print("Press q to quit")
     print("Press + to increase threshold")
     print("Press - to decrease threshold\n")
@@ -557,44 +669,47 @@ def main():
 
             frames.append(frame)
 
-        point_3d, pair_points = triangulate_from_detected_points(
+        point_cam1, pair_points = triangulate_from_detected_points(
             detected_points,
             intrinsics,
             projections
         )
 
-        coord_text, text_color = format_coordinate_text(point_3d)
-
-        # Resize each camera for grid
-        display_frames = [
-            cv.resize(frame, (CAM_WIDTH // 2, CAM_HEIGHT // 2))
-            for frame in frames
-        ]
-
-        top_row = np.hstack(
-            (
-                display_frames[0],
-                display_frames[1]
+        if point_cam1 is not None:
+            point_world = cam1_to_world(
+                point_cam1,
+                world_scale,
+                world_R,
+                world_t
             )
-        )
 
-        bottom_row = np.hstack(
-            (
-                display_frames[2],
-                display_frames[3]
+            world_text = format_point(
+                point_world,
+                "WORLD"
             )
-        )
 
-        grid = np.vstack(
-            (
-                top_row,
-                bottom_row
-            )
-        )
+            text_color = (0, 255, 0)
 
+            if SHOW_CAM1_COORDS_TOO:
+                cam1_text = format_point(
+                    point_cam1,
+                    "CAM1"
+                )
+            else:
+                cam1_text = ""
+
+        else:
+            point_world = None
+            world_text = "WORLD: LED not found in at least 2 cameras"
+            cam1_text = ""
+            text_color = (0, 0, 255)
+
+        grid = create_grid(frames)
+
+        # Draw coordinate panel
         cv.rectangle(
             grid,
-            (0, CAM_HEIGHT - 45),
+            (0, CAM_HEIGHT - 70),
             (CAM_WIDTH, CAM_HEIGHT),
             (0, 0, 0),
             -1
@@ -602,13 +717,24 @@ def main():
 
         cv.putText(
             grid,
-            coord_text,
-            (20, CAM_HEIGHT - 15),
+            world_text,
+            (15, CAM_HEIGHT - 42),
             cv.FONT_HERSHEY_SIMPLEX,
-            0.75,
+            0.58,
             text_color,
             2
         )
+
+        if SHOW_CAM1_COORDS_TOO and cam1_text != "":
+            cv.putText(
+                grid,
+                cam1_text,
+                (15, CAM_HEIGHT - 15),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.50,
+                (255, 255, 255),
+                1
+            )
 
         cv.imshow(
             window_name,

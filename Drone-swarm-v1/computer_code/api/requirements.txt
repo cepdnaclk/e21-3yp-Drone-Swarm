@@ -1,0 +1,7 @@
+opencv-python>=4.8
+numpy
+scipy
+flask
+flask-cors
+flask-socketio
+pyserial

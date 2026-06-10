@@ -5,15 +5,18 @@ import "./App.css";
 
 import LoginPage from "./pages/login.jsx";
 import ProjectPage from "./pages/projectPage.jsx";
+import AdminLayout from "./pages/admin/adminLayout.jsx";
+import AdminDashboard from "./pages/admin/dashboard.jsx";
+import AdminUsersPage from "./pages/admin/usersPage.jsx";
+import AdminProjectsPage from "./pages/admin/projectsAdminPage.jsx";
 
 const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 /* 🔐 AUTH CHECK HOOK */
 function useAuth() {
     const [loading, setLoading] = useState(true);
-    const [isAuth, setIsAuth] = useState(false);
+    const [user, setUser] = useState(null);
 
-    // 1. Pulled this out so we can call it manually after login/logout
     async function checkAuth() {
         setLoading(true);
         try {
@@ -21,13 +24,11 @@ function useAuth() {
                 method: "GET",
                 credentials: "include",
             });
-            
+
             const data = await res.json();
-            
-            // 2. We now check for the user object instead of res.ok
-            setIsAuth(!!data.user); 
+            setUser(data.user || null);
         } catch {
-            setIsAuth(false);
+            setUser(null);
         } finally {
             setLoading(false);
         }
@@ -37,12 +38,17 @@ function useAuth() {
         checkAuth();
     }, []);
 
-    // 3. Return checkAuth so the app can trigger it
-    return { loading, isAuth, checkAuth }; 
+    return {
+        loading,
+        user,
+        isAuth: !!user,
+        isAdmin: !!user?.isAdmin,
+        checkAuth,
+    };
 }
 
 function App() {
-    const { loading, isAuth, checkAuth } = useAuth();
+    const { loading, isAuth, isAdmin, user, checkAuth } = useAuth();
 
     if (loading) {
         return (
@@ -59,9 +65,27 @@ function App() {
     return (
         <Routes>
             <Route path="/" element={<HomeRedirect isAuth={isAuth} />} />
-            {/* 4. Pass checkAuth to the routes that change auth state */}
             <Route path="/login" element={<LoginRoute isAuth={isAuth} revalidateAuth={checkAuth} />} />
-            <Route path="/projects" element={<ProjectsRoute isAuth={isAuth} revalidateAuth={checkAuth} />} />
+            <Route
+                path="/projects"
+                element={
+                    <ProjectsRoute
+                        isAuth={isAuth}
+                        isAdmin={isAdmin}
+                        revalidateAuth={checkAuth}
+                    />
+                }
+            />
+            <Route
+                path="/admin"
+                element={
+                    <AdminRoute isAuth={isAuth} isAdmin={isAdmin} user={user} revalidateAuth={checkAuth} />
+                }
+            >
+                <Route index element={<AdminDashboard />} />
+                <Route path="users" element={<AdminUsersPage />} />
+                <Route path="projects" element={<AdminProjectsPage />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
     );
@@ -81,8 +105,7 @@ function LoginRoute({ isAuth, revalidateAuth }) {
     }
 
     async function handleLoginSuccess() {
-        // 5. Update the global auth state BEFORE navigating
-        await revalidateAuth(); 
+        await revalidateAuth();
         navigate("/projects", { replace: true });
     }
 
@@ -90,7 +113,7 @@ function LoginRoute({ isAuth, revalidateAuth }) {
 }
 
 /* 📁 PROJECT ROUTE */
-function ProjectsRoute({ isAuth, revalidateAuth }) {
+function ProjectsRoute({ isAuth, isAdmin, revalidateAuth }) {
     const navigate = useNavigate();
 
     if (!isAuth) {
@@ -104,13 +127,34 @@ function ProjectsRoute({ isAuth, revalidateAuth }) {
                 credentials: "include",
             });
         } finally {
-            // 6. Clear global auth state and push to login
             await revalidateAuth();
             navigate("/login", { replace: true });
         }
     }
 
-    return <ProjectPage onLogout={handleLogout} />;
+    return <ProjectPage onLogout={handleLogout} isAdmin={isAdmin} />;
+}
+
+/* 🛡️ ADMIN ROUTE */
+function AdminRoute({ isAuth, isAdmin, user, revalidateAuth }) {
+    const navigate = useNavigate();
+
+    if (!isAuth) return <Navigate to="/login" replace />;
+    if (!isAdmin) return <Navigate to="/projects" replace />;
+
+    async function handleLogout() {
+        try {
+            await fetch(`${apiBase}/auth/logout`, {
+                method: "POST",
+                credentials: "include",
+            });
+        } finally {
+            await revalidateAuth();
+            navigate("/login", { replace: true });
+        }
+    }
+
+    return <AdminLayout user={user} onLogout={handleLogout} />;
 }
 
 export default App;

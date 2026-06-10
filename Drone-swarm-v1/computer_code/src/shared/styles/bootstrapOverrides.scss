@@ -1,11 +1,34 @@
-@import '../../../node_modules/bootstrap/scss/functions';
-@import '../../../node_modules/bootstrap/scss/variables';
+@import "../../../node_modules/bootstrap/scss/functions";
+@import "../../../node_modules/bootstrap/scss/variables";
 
-$card-border-radius: 10px;
-$card-border-color:  none;
+$body-bg: #242424;
+$body-color: #f2f0ea;
 
+$primary: #d59a15;
+$secondary: #5d5b57;
+$success: #7bb347;
+$warning: #d59a15;
+$danger: #cc4242;
+$light: #3d3d3b;
+$dark: #1f1f1f;
+
+$input-bg: #2f2f2f;
+$input-color: #f2f0ea;
+$input-border-color: #7a7469;
+$input-focus-bg: #333331;
+$input-focus-border-color: #ffbe3a;
+
+$card-bg: #3b3b3a;
+$card-border-radius: 12px;
+$card-border-color: #56534d;
+
+$dropdown-bg: #343433;
+$dropdown-border-color: #5d5b57;
+$dropdown-link-color: #f2f0ea;
+$dropdown-link-hover-bg: rgba(213, 154, 21, 0.14);
+$dropdown-link-hover-color: #ffcf62;
 $dropdown-divider-margin-y: 0;
-$dropdown-padding-y:        0;
-$dropdown-item-padding-y:   $spacer*0.5;
+$dropdown-padding-y: 0;
+$dropdown-item-padding-y: $spacer * 0.5;
 
-$box-shadow: 0 1px 2px 0 rgb(60 64 67 / 20%), 0 2px 6px 2px rgb(60 64 67 / 10%);
+$box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);

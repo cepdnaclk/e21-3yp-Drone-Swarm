@@ -1,8 +1,9 @@
-// Mocap PC <-> drone bridge (laptop-side ESP32, USB serial <-> ESP-NOW).
+// Mocap PC <-> drone bridge (laptop-side ESP32, WiFi UDP/USB serial <-> ESP-NOW).
 //
 // Direction PC -> drone:
-//   Reads three line-based formats from USB serial @ 115200 and forwards as
-//   a binary StatePacket (msg_type-tagged) via ESP-NOW @ 50 Hz to the drone:
+//   Creates a WiFi AP and reads three line-based formats from UDP port 4210.
+//   USB serial @ 115200 is kept as a fallback/debug input. Parsed commands are
+//   forwarded as a binary StatePacket (msg_type-tagged) via ESP-NOW @ 50 Hz:
 //
 //     "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed\n"  -> msg_type 0
 //     "P,<17 floats>\n"                                  -> msg_type 2 (PID + ground effect)
@@ -21,6 +22,7 @@
 
 #include <esp_now.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <esp_wifi.h>
 #include <string.h>
 
@@ -29,6 +31,13 @@ uint8_t receiverAddress[] = { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
 #define ESPNOW_CHANNEL 1
 #define SEND_PERIOD_MS 20   // 50 Hz state stream
 #define DEBUG_CMD_PRINT 0
+
+// Laptop connects to this AP, then sends UDP command lines to 192.168.4.1:4210.
+// Password must be at least 8 characters for WPA2. Change it before field tests.
+#define AP_SSID "DroneSender"
+#define AP_PASS "drone1234"
+#define UDP_PORT 4210
+#define AP_MAX_CLIENTS 4
 // =================================================
 
 // Tagged ESP-NOW packet. msg_type selects which fields the receiver applies.
@@ -59,8 +68,10 @@ typedef struct __attribute__((packed)) {
 
 StatePacket latestState = {};
 uint32_t lastSend = 0;
+uint32_t lastApCheck = 0;
 uint32_t seqCounter = 0;
 String inputLine = "";
+WiFiUDP udp;
 
 // Parse N comma-separated floats from `line` starting at offset `start`.
 // Returns true on success, false if any field is missing or non-numeric.
@@ -160,6 +171,69 @@ static void parseSerialLine(const String &line) {
   }
 }
 
+static void parseCommandBuffer(const char *buf, int len) {
+  String line = "";
+  for (int i = 0; i < len; i++) {
+    char c = buf[i];
+    if (c == '\n') {
+      parseSerialLine(line);
+      line = "";
+    } else if (c != '\r' && c != '\0') {
+      line += c;
+      if (line.length() > 256) line = "";
+    }
+  }
+  if (line.length() > 0) {
+    parseSerialLine(line);
+  }
+}
+
+static void pollUdpCommands() {
+  int packetSize = udp.parsePacket();
+  while (packetSize > 0) {
+    char buf[512];
+    int len = udp.read(buf, sizeof(buf));
+    if (len > 0) {
+      parseCommandBuffer(buf, len);
+    }
+    packetSize = udp.parsePacket();
+  }
+}
+
+static bool startAccessPoint() {
+  IPAddress localIp(192, 168, 4, 1);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+
+  WiFi.softAPConfig(localIp, gateway, subnet);
+  bool ok = WiFi.softAP(AP_SSID, AP_PASS, ESPNOW_CHANNEL, false, AP_MAX_CLIENTS);
+  udp.begin(UDP_PORT);
+
+  IPAddress apIp = WiFi.softAPIP();
+  Serial.printf("[sender] WiFi AP: %s  IP: %s  UDP port: %u  channel: %u\n",
+                AP_SSID, apIp.toString().c_str(), UDP_PORT, ESPNOW_CHANNEL);
+  Serial.printf("[sender] AP start: %s\n", ok ? "OK" : "FAILED");
+  return ok;
+}
+
+static void checkAccessPoint() {
+  uint32_t now = millis();
+  if (now - lastApCheck < 5000) return;
+  lastApCheck = now;
+
+  wifi_mode_t mode;
+  esp_wifi_get_mode(&mode);
+  if (mode != WIFI_MODE_APSTA && mode != WIFI_MODE_AP) {
+    Serial.println("[sender] AP not active; restarting WiFi AP");
+    WiFi.mode(WIFI_AP_STA);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    startAccessPoint();
+    return;
+  }
+
+  Serial.printf("[sender] AP clients: %u\n", WiFi.softAPgetStationNum());
+}
+
 void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   // Quiet on purpose. Uncomment for debugging.
   // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "ESP-NOW OK" : "ESP-NOW FAIL");
@@ -180,8 +254,12 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  WiFi.mode(WIFI_STA);
-  WiFi.setChannel(ESPNOW_CHANNEL);
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_max_tx_power(78);  // 19.5 dBm, max allowed by ESP-IDF units.
+  startAccessPoint();
 
   // Print our MAC so the user can paste it into drone_receiver_crsf_espnow.ino
   uint8_t staMac[6];
@@ -211,11 +289,15 @@ void setup() {
   latestState.armed = 0;
   latestState.msg_type = 0;
 
-  Serial.println("Transmitter ready: Python Serial -> ESP-NOW; ESP-NOW -> H<yaw>");
+  Serial.println("Transmitter ready: UDP/Serial -> ESP-NOW; ESP-NOW -> H<yaw>");
+  Serial.println("WiFi UDP ready: connect laptop to AP and send command lines to 192.168.4.1:4210");
   Serial.println("Format: S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed");
 }
 
 void loop() {
+  checkAccessPoint();
+  pollUdpCommands();
+
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n') {

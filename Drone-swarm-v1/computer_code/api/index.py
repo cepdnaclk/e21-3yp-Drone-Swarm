@@ -19,10 +19,18 @@ Serial protocol (sender_esp32.ino):
 Environment:
     SENDER_SERIAL_PORT   default 'COM5' on Windows
     SENDER_SERIAL_BAUD   default 115200
+
+$env:SENDER_TRANSPORT="udp"
+$env:SENDER_UDP_HOST="192.168.4.1"
+$env:SENDER_UDP_PORT="4210"
+python Drone-swarm-v1/computer_code/api/index.py
+
+
 """
 
 import json
 import os
+import socket
 import threading
 import time
 
@@ -44,6 +52,9 @@ from LowPassFilter import LowPassFilter
 
 SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM6")
 SERIAL_BAUD = int(os.environ.get("SENDER_SERIAL_BAUD", "115200"))
+SENDER_TRANSPORT = os.environ.get("SENDER_TRANSPORT", "serial").lower()
+SENDER_UDP_HOST = os.environ.get("SENDER_UDP_HOST", "192.168.4.1")
+SENDER_UDP_PORT = int(os.environ.get("SENDER_UDP_PORT", "4210"))
 
 CONTROL_HZ = 60.0
 EMIT_HZ = 30.0
@@ -69,6 +80,7 @@ controller = Controller()
 
 # Serial / heading
 _ser = None
+_udp_sock = None
 _ser_lock = threading.Lock()           # guards _ser.write() only; reads are on their own thread
 _heading_lock = threading.Lock()
 _latest_heading = None                 # float rad, post-LPF
@@ -104,8 +116,34 @@ def _open_serial():
     return _ser
 
 
+def _open_udp():
+    global _udp_sock
+    if _udp_sock is not None:
+        return _udp_sock
+    try:
+        _udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _udp_sock.setblocking(False)
+        print(f"[udp] sender target {SENDER_UDP_HOST}:{SENDER_UDP_PORT}")
+    except Exception as e:
+        print(f"[udp] WARNING: failed to open UDP socket: {e}")
+        _udp_sock = None
+    return _udp_sock
+
+
 def _serial_write(payload: bytes):
-    if _ser is None or not _ser.is_open or not payload:
+    if not payload:
+        return
+    if SENDER_TRANSPORT == "udp":
+        sock = _open_udp()
+        if sock is None:
+            return
+        try:
+            sock.sendto(payload, (SENDER_UDP_HOST, SENDER_UDP_PORT))
+        except Exception as e:
+            print(f"[udp] send failed: {e}")
+        return
+
+    if _ser is None or not _ser.is_open:
         return
     try:
         with _ser_lock:
@@ -122,6 +160,9 @@ def _heading_reader_loop():
     global _latest_heading, _latest_heading_t
     print("[heading] reader started")
     while True:
+        if SENDER_TRANSPORT == "udp":
+            time.sleep(0.5)
+            continue
         if _ser is None or not _ser.is_open:
             time.sleep(0.5)
             continue
@@ -392,7 +433,10 @@ def on_triangulate_points(_data):
 # =========================
 
 def _start_background_threads():
-    _open_serial()
+    if SENDER_TRANSPORT == "udp":
+        _open_udp()
+    else:
+        _open_serial()
     cameras.start()
     threading.Thread(target=_heading_reader_loop, daemon=True, name="HeadingReader").start()
     threading.Thread(target=_control_loop, daemon=True, name="Control").start()

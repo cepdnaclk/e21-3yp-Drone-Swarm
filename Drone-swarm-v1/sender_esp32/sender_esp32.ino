@@ -58,8 +58,8 @@ typedef struct __attribute__((packed)) {
   int16_t  pitch_centirad;   // 1/10000 rad (CRSF native units)
   int16_t  roll_centirad;
   int16_t  yaw_centirad;
-  uint16_t battery_mv;       // pack voltage in millivolts (post-divider)
-  uint8_t  battery_pct;      // 0..100 linear
+  uint16_t battery_mv;       // pack voltage in millivolts (from FC CRSF battery frame)
+  uint8_t  battery_pct;      // 0..100; FC remaining-% if set, else voltage-mapped
   uint8_t  _pad;
   uint32_t seq;
 } TelemetryPacket;

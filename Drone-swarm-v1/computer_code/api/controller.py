@@ -126,6 +126,14 @@ class Controller:
         self._sp.y = float(y)
         self._sp.z = float(z)
 
+    def cmd_yaw(self, heading: float):
+        """Set the yaw setpoint (radians, world frame)."""
+        self._sp.heading = float(heading)
+
+    def get_setpoint(self) -> tuple:
+        """Current latched setpoint as (x, y, z, heading)."""
+        return (self._sp.x, self._sp.y, self._sp.z, self._sp.heading)
+
     def get_state(self) -> str:
         return self.state.value
 

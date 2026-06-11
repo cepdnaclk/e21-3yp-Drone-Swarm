@@ -98,6 +98,22 @@ _fleet_lock = threading.Lock()
 _fleet = _load_fleet()
 _selected_drone_mac = None  # which drone the MoCap section is currently controlling
 
+# Latest battery reading per drone MAC: {mac: {"pct": int, "mv": int, "t": float}}
+_battery_lock = threading.Lock()
+_battery = {}
+
+# Last PID gains pushed to the drone. The console's "pid <index> <value>"
+# command edits one slot of this and re-sends the full set.
+_pid_lock = threading.Lock()
+_current_pid = [
+    2.5, 0.0, 0.4,      # xy pos
+    3.5, 0.5, 0.5,      # z pos
+    80.0, 10.0, 5.0,    # yaw
+    8.0, 1.0, 0.3,      # xy vel
+    120.0, 40.0, 20.0,  # z vel
+    0.0, 0.0,           # ground effect
+]
+
 
 # =========================
 # Globals
@@ -206,10 +222,15 @@ def _heading_reader_loop():
                 pct = max(0, min(100, int(float(parts[2]))))
             except ValueError:
                 continue
+            with _battery_lock:
+                _battery[mac] = {"pct": pct, "mv": mv, "t": time.perf_counter()}
             socketio.emit("drone-telemetry", {
                 "mac": mac,
                 "battery": pct,
                 "battery_mv": mv,
+            })
+            _algorithm_runner.notify_telemetry({
+                "mac": mac, "battery": pct, "battery_mv": mv,
             })
 
 
@@ -314,6 +335,396 @@ def _emitter_loop():
                   f"last pos={pos}")
             emit_count = 0
             last_hb = now
+
+
+# =========================
+# Console command dispatch
+# =========================
+
+def _resolve_target(target):
+    """Resolve a console target ("all" or a fleet drone id/mac) to a fleet
+    entry, or None for the whole swarm. Raises ValueError on bad targets."""
+    if not target or target == "all":
+        return None
+    with _fleet_lock:
+        for d in _fleet:
+            if d["id"] == target or d["mac"] == _normalise_mac(str(target)):
+                if not d["active"]:
+                    raise ValueError(f"drone '{d['name']}' is on standby")
+                return dict(d)
+    raise ValueError(f"unknown target '{target}'")
+
+
+def _retarget_radio(mac: str):
+    """Point the sender ESP32 at `mac` if it isn't already."""
+    global _selected_drone_mac
+    if _selected_drone_mac != mac:
+        _selected_drone_mac = mac
+        _serial_write(f"M,{mac}\n".encode("ascii"))
+
+
+def _current_position():
+    with _state_lock:
+        pos = _emit_state["pos"]
+    return list(pos) if pos else None
+
+
+def _console_dispatch(command: str, args, target_entry):
+    """Execute one console command. Returns the ack text.
+    Raises ValueError with a user-facing message on bad input."""
+
+    def _floats(n):
+        if len(args) < n:
+            raise ValueError(f"{command} needs {n} argument(s)")
+        try:
+            return [float(a) for a in args[:n]]
+        except ValueError:
+            raise ValueError(f"{command}: arguments must be numbers")
+
+    if command == "arm":
+        if not args or args[0].lower() not in ("on", "off"):
+            raise ValueError("usage: arm <on|off>")
+        on = args[0].lower() == "on"
+        controller.cmd_arm(on)
+        return f"{'armed' if on else 'disarmed'} (state {controller.get_state()})"
+
+    if command == "takeoff":
+        (z,) = _floats(1)
+        if z <= 0 or z > 2.0:
+            raise ValueError("takeoff: z must be in (0, 2.0] metres")
+        if not controller.is_armed():
+            raise ValueError("takeoff: drone is not armed (send 'arm on' first)")
+        controller.cmd_takeoff(z)
+        return f"takeoff to {z:.2f} m commanded"
+
+    if command == "land":
+        controller.cmd_land()
+        return f"landing (state {controller.get_state()})"
+
+    if command == "goto":
+        x, y, z = _floats(3)
+        controller.cmd_setpoint(x, y, z)
+        return f"setpoint -> ({x:.2f}, {y:.2f}, {z:.2f})"
+
+    if command == "move":
+        dx, dy, dz = _floats(3)
+        sx, sy, sz, _ = controller.get_setpoint()
+        controller.cmd_setpoint(sx + dx, sy + dy, sz + dz)
+        return f"setpoint -> ({sx + dx:.2f}, {sy + dy:.2f}, {sz + dz:.2f})"
+
+    if command == "yaw":
+        (yaw,) = _floats(1)
+        controller.cmd_yaw(yaw)
+        return f"yaw setpoint -> {yaw:.3f} rad"
+
+    if command == "hover":
+        # The controller holds the latched setpoint by itself; hover is an
+        # acknowledgement that nothing will be retargeted for N seconds.
+        secs = _floats(1)[0] if args else 0.0
+        return f"holding setpoint{f' for {secs:.1f} s' if secs else ''}"
+
+    if command == "trim":
+        t = _floats(4)
+        _serial_write(Controller.serialize_trim(int(t[0]), int(t[1]), int(t[2]), int(t[3])))
+        return f"trim -> T{int(t[0])} R{int(t[1])} P{int(t[2])} Y{int(t[3])}"
+
+    if command == "pid":
+        idx_f, value = _floats(2)
+        idx = int(idx_f)
+        if not 0 <= idx < 17:
+            raise ValueError("pid: index must be 0..16")
+        with _pid_lock:
+            _current_pid[idx] = value
+            gains = list(_current_pid)
+        _serial_write(Controller.serialize_pid(gains))
+        return f"pid[{idx}] -> {value:g} (full set re-sent)"
+
+    if command == "estop":
+        controller.cmd_arm(False)
+        return "EMERGENCY STOP — disarmed"
+
+    if command == "ping":
+        pos = _current_position()
+        with _battery_lock:
+            batt = dict(_battery)
+        pos_txt = ("(" + ", ".join(f"{v:.2f}" for v in pos) + ")") if pos else "unknown"
+        if target_entry:
+            b = batt.get(target_entry["mac"])
+            batt_txt = f"{b['pct']}% ({b['mv']} mV)" if b else "no battery data"
+            return (f"{target_entry['name']}: state {controller.get_state()}, "
+                    f"pos {pos_txt}, battery {batt_txt}")
+        return f"state {controller.get_state()}, pos {pos_txt}, {len(batt)} drone(s) reporting battery"
+
+    raise ValueError(f"unknown command '{command}'")
+
+
+@socketio.on("console-command")
+def on_console_command(data):
+    if not isinstance(data, dict):
+        return
+    target = str(data.get("target", "all"))
+    command = str(data.get("command", "")).strip().lower()
+    args = [str(a) for a in (data.get("args") or [])]
+
+    try:
+        entry = _resolve_target(target)
+        if entry is not None:
+            _retarget_radio(entry["mac"])
+        text = _console_dispatch(command, args, entry)
+        socketio.emit("console-ack", {"target": target, "text": text})
+        print(f"[console] {target}: {command} {' '.join(args)} -> {text}")
+    except ValueError as e:
+        socketio.emit("console-error", {"target": target, "text": str(e)})
+    except Exception as e:  # never let a console command kill the handler
+        socketio.emit("console-error", {"target": target, "text": f"internal error: {e}"})
+        print(f"[console] ERROR on '{command}': {e}")
+
+
+# =========================
+# Algorithm runner
+# =========================
+
+UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+
+
+class AlgorithmStopped(Exception):
+    """Raised inside user scripts when the UI requests a stop."""
+
+
+class AlgorithmRunner:
+    """Executes an uploaded .py mission script on a worker thread.
+
+    The script gets a set of premade functions (arm, takeoff, goto, ...) that
+    drive the single shared Controller. Exactly one script runs at a time.
+    A stop request raises AlgorithmStopped at the next API call / wait tick.
+    """
+
+    def __init__(self):
+        self._thread = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._telemetry_callbacks = []
+        self.filename = None
+
+    # ---- lifecycle ----
+
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, filename: str, source: str) -> str:
+        with self._lock:
+            if self.running():
+                raise ValueError("an algorithm is already running — stop it first")
+            try:
+                code = compile(source, filename, "exec")
+            except SyntaxError as e:
+                raise ValueError(f"syntax error: line {e.lineno}: {e.msg}")
+
+            os.makedirs(UPLOADS_DIR, exist_ok=True)
+            safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename) or "algorithm.py"
+            path = os.path.join(UPLOADS_DIR, f"{int(time.time())}_{safe_name}")
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(source)
+            except OSError as e:
+                print(f"[algo] WARNING: could not persist upload: {e}")
+
+            self._stop.clear()
+            self._telemetry_callbacks = []
+            self.filename = filename
+            self._thread = threading.Thread(
+                target=self._run, args=(code,), daemon=True, name="Algorithm")
+            self._thread.start()
+            return path
+
+    def stop(self):
+        self._stop.set()
+
+    def notify_telemetry(self, packet: dict):
+        for cb in list(self._telemetry_callbacks):
+            try:
+                cb(packet)
+            except AlgorithmStopped:
+                pass
+            except Exception as e:
+                self._log(f"on_telemetry callback error: {e}", stream="err")
+
+    # ---- internals ----
+
+    def _log(self, text, stream="out"):
+        socketio.emit("algorithm-log", {"text": str(text), "stream": stream})
+
+    def _status(self, status, error=None):
+        socketio.emit("algorithm-status",
+                      {"status": status, "filename": self.filename, "error": error})
+
+    def _check_stop(self):
+        if self._stop.is_set():
+            raise AlgorithmStopped()
+
+    def _sleep(self, seconds: float):
+        """Stop-aware sleep in 50 ms slices."""
+        deadline = time.perf_counter() + max(0.0, float(seconds))
+        while time.perf_counter() < deadline:
+            self._check_stop()
+            time.sleep(min(0.05, max(0.0, deadline - time.perf_counter())))
+        self._check_stop()
+
+    def _wait_for_state(self, want, timeout: float):
+        """Block until controller state is one of `want` (or timeout)."""
+        deadline = time.perf_counter() + timeout
+        while time.perf_counter() < deadline:
+            self._check_stop()
+            if controller.get_state() in want:
+                return True
+            time.sleep(0.05)
+        return False
+
+    # ---- premade function API exposed to scripts ----
+
+    def _build_api(self):
+        runner = self
+
+        def log(*parts):
+            runner._log(" ".join(str(p) for p in parts))
+
+        def arm(drone_id=None):
+            runner._check_stop()
+            controller.cmd_arm(True)
+            if not runner._wait_for_state(("READY",), timeout=5.0):
+                raise RuntimeError("arm: controller did not reach READY within 5 s")
+            log("armed")
+
+        def disarm(drone_id=None):
+            controller.cmd_arm(False)
+            log("disarmed")
+
+        def takeoff(z, drone_id=None):
+            runner._check_stop()
+            z = float(z)
+            if not controller.is_armed():
+                raise RuntimeError("takeoff: not armed — call arm() first")
+            controller.cmd_takeoff(z)
+            if not runner._wait_for_state(("HOVER",), timeout=20.0):
+                raise RuntimeError("takeoff: did not reach HOVER within 20 s")
+            log(f"hovering at {z:.2f} m")
+
+        def land(drone_id=None):
+            runner._check_stop()
+            controller.cmd_land()
+            runner._wait_for_state(("IDLE",), timeout=15.0)
+            log("landed")
+
+        def goto(x, y, z, drone_id=None):
+            runner._check_stop()
+            controller.cmd_setpoint(float(x), float(y), float(z))
+            log(f"setpoint ({float(x):.2f}, {float(y):.2f}, {float(z):.2f})")
+
+        def move(dx, dy, dz, drone_id=None):
+            runner._check_stop()
+            sx, sy, sz, _ = controller.get_setpoint()
+            goto(sx + float(dx), sy + float(dy), sz + float(dz))
+
+        def set_yaw(yaw, drone_id=None):
+            runner._check_stop()
+            controller.cmd_yaw(float(yaw))
+
+        def wait(seconds):
+            runner._sleep(seconds)
+
+        def get_position(drone_id=None):
+            pos = _current_position()
+            return tuple(pos) if pos else None
+
+        def get_battery(drone_id):
+            mac = None
+            with _fleet_lock:
+                for d in _fleet:
+                    if drone_id in (d["id"], d["name"]) or \
+                       _normalise_mac(str(drone_id)) == d["mac"]:
+                        mac = d["mac"]
+                        break
+            if mac is None:
+                mac = _normalise_mac(str(drone_id))
+            with _battery_lock:
+                b = _battery.get(mac)
+            return float(b["pct"]) if b else None
+
+        def list_active():
+            with _fleet_lock:
+                return [d["id"] for d in _fleet if d["active"]]
+
+        def get_state():
+            return controller.get_state()
+
+        def on_telemetry(callback):
+            if callable(callback):
+                runner._telemetry_callbacks.append(callback)
+
+        return {
+            "arm": arm, "disarm": disarm,
+            "takeoff": takeoff, "land": land,
+            "goto": goto, "move": move, "set_yaw": set_yaw,
+            "wait": wait,
+            "get_position": get_position, "get_battery": get_battery,
+            "list_active": list_active, "get_state": get_state,
+            "on_telemetry": on_telemetry,
+            "log": log, "print": log,
+        }
+
+    def _run(self, code):
+        self._status("running")
+        self._log(f"--- {self.filename} started ---", stream="sys")
+        try:
+            exec(code, {"__name__": "__main__", **self._build_api()})
+            self._log(f"--- {self.filename} finished ---", stream="sys")
+            self._status("finished")
+        except AlgorithmStopped:
+            self._log(f"--- {self.filename} stopped by user ---", stream="sys")
+            self._status("stopped")
+        except Exception as e:
+            self._log(f"ERROR: {type(e).__name__}: {e}", stream="err")
+            self._status("error", error=f"{type(e).__name__}: {e}")
+        finally:
+            # Safety net: never leave the drone airborne or armed when the
+            # script is done. Landing auto-disarms at touchdown.
+            state = controller.get_state()
+            if state in ("TAKEOFF", "HOVER"):
+                self._log("safety: script ended while flying — landing", stream="sys")
+                controller.cmd_land()
+            elif state in ("ARMING", "READY"):
+                self._log("safety: script ended while armed — disarming", stream="sys")
+                controller.cmd_arm(False)
+
+
+_algorithm_runner = AlgorithmRunner()
+
+
+@socketio.on("algorithm-upload")
+def on_algorithm_upload(data):
+    """Receive a .py mission script and start executing it. The return value
+    doubles as the socket.io ack payload for the frontend's callback."""
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    filename = str(data.get("filename", "algorithm.py"))
+    source = data.get("source")
+    if not filename.lower().endswith(".py"):
+        return {"ok": False, "error": "only .py files are supported"}
+    if not isinstance(source, str) or not source.strip():
+        return {"ok": False, "error": "empty script"}
+    try:
+        _algorithm_runner.start(filename, source)
+        return {"ok": True}
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+
+@socketio.on("algorithm-stop")
+def on_algorithm_stop(_data=None):
+    if _algorithm_runner.running():
+        _algorithm_runner.stop()
+        return {"ok": True}
+    return {"ok": False, "error": "no algorithm running"}
 
 
 # =========================
@@ -441,11 +852,16 @@ def on_land(_data):
 
 @socketio.on("set-drone-pid")
 def on_set_pid(data):
+    global _current_pid
     if not (isinstance(data, dict) and "dronePID" in data):
         return
     gains = data["dronePID"]
     if not isinstance(gains, (list, tuple)) or len(gains) < 15:
         return
+    with _pid_lock:
+        _current_pid = [float(x) for x in gains[:17]]
+        while len(_current_pid) < 17:
+            _current_pid.append(0.0)
     _serial_write(Controller.serialize_pid(gains))
 
 

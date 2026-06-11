@@ -250,7 +250,13 @@ body {
 .drone-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.4rem;
   margin-top: 0.8rem;
+}
+
+.drone-row-error {
+  margin-top: 0.4rem;
+  text-align: right;
 }
 
 .battery-meter {
@@ -500,6 +506,20 @@ body {
   color: var(--accent-soft);
 }
 
+.upload-run-log {
+  min-height: 120px;
+  max-height: 260px;
+}
+
+.upload-run-log .console-line {
+  grid-template-columns: 1fr;
+}
+
+.console-sys .console-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .upload-preview {
   margin-top: 0.4rem;
   padding: 0.85rem;
@@ -673,6 +693,21 @@ body {
     linear-gradient(180deg, rgba(255, 191, 59, 0.05), transparent),
     #2a2a2a;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.mocap-scene-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 380px;
+  /* three.js's Canvas measures the parent on mount; an explicit positioned
+     ancestor lets it pick up the post-flex height instead of collapsing. */
+  position: relative;
+}
+
+.mocap-scene-frame canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .camera-frame {

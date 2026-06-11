@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, Col, Row } from "react-bootstrap";
 
 import { socket } from "../shared/styles/scripts/socket";
@@ -14,67 +14,84 @@ type PremadeFn = {
 const PREMADE_FUNCTIONS: PremadeFn[] = [
   {
     name: "arm",
-    signature: "arm(drone_id: str | None = None) -> None",
-    description: "Arm a specific drone, or every active drone when omitted.",
+    signature: "arm() -> None",
+    description: "Arm the drone. Blocks until the controller reaches READY.",
   },
   {
     name: "disarm",
-    signature: "disarm(drone_id: str | None = None) -> None",
-    description: "Disarm a specific drone or the whole swarm.",
+    signature: "disarm() -> None",
+    description: "Disarm immediately.",
   },
   {
     name: "takeoff",
-    signature: "takeoff(z: float, drone_id: str | None = None) -> None",
-    description: "Climb to z meters and hold.",
+    signature: "takeoff(z: float) -> None",
+    description: "Climb to z meters. Blocks until HOVER is reached.",
   },
   {
     name: "land",
-    signature: "land(drone_id: str | None = None) -> None",
-    description: "Descend and disarm at touchdown.",
+    signature: "land() -> None",
+    description: "Descend and disarm at touchdown. Blocks until landed.",
   },
   {
     name: "goto",
-    signature: "goto(x: float, y: float, z: float, drone_id: str | None = None) -> None",
-    description: "Move to an absolute world position.",
+    signature: "goto(x: float, y: float, z: float) -> None",
+    description: "Retarget the setpoint to an absolute world position (non-blocking).",
   },
   {
     name: "move",
-    signature: "move(dx: float, dy: float, dz: float, drone_id: str | None = None) -> None",
-    description: "Move relative to the current position.",
+    signature: "move(dx: float, dy: float, dz: float) -> None",
+    description: "Shift the setpoint relative to the current one (non-blocking).",
   },
   {
     name: "set_yaw",
-    signature: "set_yaw(yaw: float, drone_id: str | None = None) -> None",
+    signature: "set_yaw(yaw: float) -> None",
     description: "Rotate to an absolute yaw (radians).",
   },
   {
     name: "wait",
     signature: "wait(seconds: float) -> None",
-    description: "Block the algorithm thread.",
+    description: "Sleep. Use after goto/move to let the drone get there.",
   },
   {
     name: "get_position",
-    signature: "get_position(drone_id: str) -> tuple[float, float, float]",
-    description: "Return the latest world position.",
+    signature: "get_position() -> tuple[float, float, float] | None",
+    description: "Latest tracked world position in metres.",
   },
   {
     name: "get_battery",
-    signature: "get_battery(drone_id: str) -> float",
-    description: "Return battery percentage.",
+    signature: "get_battery(drone_id: str) -> float | None",
+    description: "Battery percentage by drone id, name, or MAC.",
+  },
+  {
+    name: "get_state",
+    signature: "get_state() -> str",
+    description: "Controller state (IDLE, READY, TAKEOFF, HOVER, ...).",
   },
   {
     name: "list_active",
     signature: "list_active() -> list[str]",
-    description: "Return ids of all drones currently active.",
+    description: "Ids of all drones currently marked active.",
   },
   {
     name: "on_telemetry",
     signature: "on_telemetry(callback) -> None",
-    description: "Register a callback that fires on every telemetry packet.",
+    description: "Register a callback fired on every battery telemetry packet.",
+  },
+  {
+    name: "log / print",
+    signature: "log(*args) -> None",
+    description: "Write a line to the run log below.",
   },
 ];
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
+type RunStatus = "idle" | "running" | "finished" | "error" | "stopped";
+
+type RunLogEntry = {
+  id: number;
+  stream: "out" | "err" | "sys";
+  text: string;
+};
 
 const formatSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -89,6 +106,43 @@ export default function UploadView() {
   const [message, setMessage] = useState<string>("");
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [runLog, setRunLog] = useState<RunLogEntry[]>([]);
+  const runLogRef = useRef<HTMLDivElement | null>(null);
+  const logIdRef = useRef(0);
+
+  useEffect(() => {
+    const onLog = (data: { text?: string; stream?: string }) => {
+      logIdRef.current += 1;
+      const stream =
+        data.stream === "err" || data.stream === "sys" ? data.stream : "out";
+      setRunLog((prev) =>
+        [
+          ...prev,
+          { id: logIdRef.current, stream, text: data.text ?? "" } as RunLogEntry,
+        ].slice(-500)
+      );
+    };
+    const onStatus = (data: { status?: string; error?: string }) => {
+      const s = data.status;
+      if (s === "running" || s === "finished" || s === "error" || s === "stopped") {
+        setRunStatus(s);
+      }
+    };
+    socket.on("algorithm-log", onLog);
+    socket.on("algorithm-status", onStatus);
+    return () => {
+      socket.off("algorithm-log", onLog);
+      socket.off("algorithm-status", onStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (runLogRef.current) {
+      runLogRef.current.scrollTop = runLogRef.current.scrollHeight;
+    }
+  }, [runLog]);
 
   const pickFile = (f: File | null) => {
     setStatus("idle");
@@ -128,6 +182,7 @@ export default function UploadView() {
     if (!file) return;
     setStatus("uploading");
     setMessage("");
+    setRunLog([]);
     try {
       const text = await file.text();
       socket.emit(
@@ -136,7 +191,7 @@ export default function UploadView() {
         (ack: { ok?: boolean; error?: string } | undefined) => {
           if (ack && ack.ok) {
             setStatus("success");
-            setMessage(`${file.name} accepted by the swarm controller.`);
+            setMessage(`${file.name} accepted — running.`);
           } else if (ack && ack.error) {
             setStatus("error");
             setMessage(ack.error);
@@ -150,6 +205,10 @@ export default function UploadView() {
       setStatus("error");
       setMessage(err instanceof Error ? err.message : "Upload failed.");
     }
+  };
+
+  const stopAlgorithm = () => {
+    socket.emit("algorithm-stop", {});
   };
 
   const clear = () => {
@@ -176,8 +235,12 @@ export default function UploadView() {
               <b>{file ? file.name : "—"}</b>
             </span>
             <span className="status-pill">
-              <span className="status-label">Status</span>
+              <span className="status-label">Upload</span>
               <b>{status}</b>
+            </span>
+            <span className="status-pill">
+              <span className="status-label">Run</span>
+              <b>{runStatus}</b>
             </span>
           </div>
         </Col>
@@ -233,15 +296,27 @@ export default function UploadView() {
                   type="button"
                   className="btn btn-primary"
                   onClick={uploadFile}
-                  disabled={!file || status === "uploading"}
+                  disabled={!file || status === "uploading" || runStatus === "running"}
                 >
-                  {status === "uploading" ? "Uploading…" : "Send to swarm"}
+                  {status === "uploading"
+                    ? "Uploading…"
+                    : runStatus === "running"
+                      ? "Running…"
+                      : "Upload & run"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={stopAlgorithm}
+                  disabled={runStatus !== "running"}
+                >
+                  Stop
                 </button>
                 <button
                   type="button"
                   className="btn btn-outline-danger"
                   onClick={clear}
-                  disabled={!file}
+                  disabled={!file || runStatus === "running"}
                 >
                   Clear
                 </button>
@@ -253,6 +328,26 @@ export default function UploadView() {
                   </span>
                 )}
               </div>
+
+              {(runLog.length > 0 || runStatus !== "idle") && (
+                <>
+                  <h6 className="section-subhead mt-4">Run log</h6>
+                  <div className="console-log upload-run-log" ref={runLogRef}>
+                    {runLog.length === 0 ? (
+                      <div className="console-empty">Waiting for output…</div>
+                    ) : (
+                      runLog.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className={`console-line console-${entry.stream}`}
+                        >
+                          <span className="console-text">{entry.text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
 
               {preview && (
                 <>

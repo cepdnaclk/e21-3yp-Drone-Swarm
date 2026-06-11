@@ -51,6 +51,46 @@ type DroneState = {
 const NUM_CAMERAS = 4;
 const DEFAULT_THRESHOLD = 180;
 
+// Build an OpenCV-convention camera pose (R = camera-axes-in-world, t = centre in world)
+// that points the camera at `target` from `eye`. World is Z-up; camera is +z forward,
+// +x right, +y down. Used to render placeholder camera wireframes before the backend
+// has streamed real calibration poses.
+const buildLookAtPose = (eye: [number, number, number], target: [number, number, number]) => {
+  const sub = (a: number[], b: number[]) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cross = (a: number[], b: number[]) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const norm = (v: number[]) => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  };
+  const worldUp = [0, 0, 1];
+  const forward = norm(sub(target, eye));            // camera +z
+  let right = cross(worldUp, forward);               // camera +x
+  if (Math.hypot(right[0], right[1], right[2]) < 1e-6) right = [1, 0, 0];
+  right = norm(right);
+  const down = norm(cross(right, forward));          // camera +y
+  // R columns are right, down, forward.
+  const R: number[][] = [
+    [right[0], down[0], forward[0]],
+    [right[1], down[1], forward[1]],
+    [right[2], down[2], forward[2]],
+  ];
+  return { R, t: [eye[0], eye[1], eye[2]] };
+};
+
+// 4 cameras at the corners of a 2 m × 2 m square at ~1.5 m height, all aimed at
+// the floor centre. Replaced by real calibration poses as soon as the backend
+// emits "camera-pose".
+const FALLBACK_CAMERA_POSES: { R: number[][]; t: number[] }[] = [
+  buildLookAtPose([ 1.0,  1.0, 1.5], [0, 0, 0.3]),
+  buildLookAtPose([-1.0,  1.0, 1.5], [0, 0, 0.3]),
+  buildLookAtPose([-1.0, -1.0, 1.5], [0, 0, 0.3]),
+  buildLookAtPose([ 1.0, -1.0, 1.5], [0, 0, 0.3]),
+];
+
 export default function MoCapView() {
   const [cameraStreamRunning, setCameraStreamRunning] = useState(false);
   const [cameraThresholds, setCameraThresholds] = useState<number[]>(
@@ -237,10 +277,10 @@ export default function MoCapView() {
         </Col>
       </Row>
 
-      <Row className="g-4">
-        <Col md={6}>
-          <Card className="app-panel shadow-sm mb-3">
-            <Card.Body className="p-3">
+      <Row className="g-4 align-items-stretch">
+        <Col md={6} className="d-flex">
+          <Card className="app-panel shadow-sm mb-3 flex-fill">
+            <Card.Body className="p-3 d-flex flex-column">
               <Row className="panel-heading align-items-center">
                 <Col xs="auto">
                   <h5>Camera stream</h5>
@@ -296,19 +336,21 @@ export default function MoCapView() {
           </Card>
         </Col>
 
-        <Col md={6}>
-          <Card className="app-panel shadow-sm mb-3" style={{ minHeight: 420 }}>
-            <Card.Body className="p-3">
+        <Col md={6} className="d-flex">
+          <Card className="app-panel shadow-sm mb-3 flex-fill">
+            <Card.Body className="p-3 d-flex flex-column">
               <h5 className="panel-heading">3D scene</h5>
-              <div className="scene-frame" style={{ width: "100%", height: 380 }}>
+              <div className="scene-frame mocap-scene-frame">
                 <Canvas camera={{ position: [1.5, 1.5, 1.5], fov: 50 }}>
                   <ambientLight intensity={0.6} />
                   <directionalLight position={[5, 5, 5]} intensity={0.8} />
                   <axesHelper args={[0.5]} />
                   <gridHelper args={[2, 20]} />
-                  {cameraPoses.map((p, i) => (
-                    <CameraWireframe key={i} R={p.R} t={p.t} />
-                  ))}
+                  {(cameraPoses.length > 0 ? cameraPoses : FALLBACK_CAMERA_POSES).map(
+                    (p, i) => (
+                      <CameraWireframe key={i} R={p.R} t={p.t} />
+                    )
+                  )}
                   {droneState.pos && (
                     <mesh position={[droneState.pos[0], droneState.pos[2], -droneState.pos[1]]}>
                       <sphereGeometry args={[0.015, 12, 12]} />

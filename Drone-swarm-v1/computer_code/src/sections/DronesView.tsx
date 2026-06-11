@@ -215,6 +215,93 @@ export default function DronesView() {
   const removeDrone = (id: string) =>
     userEdit((prev) => prev.filter((d) => d.id !== id));
 
+  // Per-card edit buffers — name/MAC edits are staged here until the user
+  // clicks Update on that card. The active switch + Remove still commit
+  // immediately because they're one-shot intents.
+  type CardDraft = { name: string; mac: string };
+  const [drafts, setDrafts] = useState<Record<string, CardDraft>>({});
+  const [cardErrors, setCardErrors] = useState<Record<string, string | null>>({});
+
+  // Keep drafts in sync with the fleet: seed a draft for any new drone, drop
+  // drafts for drones that disappeared. Existing drafts are left alone so an
+  // in-flight server push doesn't wipe what the user is typing.
+  useEffect(() => {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const d of fleet) {
+        if (!next[d.id]) {
+          next[d.id] = { name: d.name, mac: d.mac };
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(next)) {
+        if (!fleet.some((d) => d.id === id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [fleet]);
+
+  const setDraftField = (id: string, patch: Partial<CardDraft>) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] ?? { name: "", mac: "" }), ...patch },
+    }));
+    setCardErrors((prev) => ({ ...prev, [id]: null }));
+  };
+
+  const isDirty = (drone: Drone) => {
+    const d = drafts[drone.id];
+    if (!d) return false;
+    return (
+      d.name !== drone.name ||
+      normaliseMac(d.mac) !== normaliseMac(drone.mac)
+    );
+  };
+
+  const commitDraft = (drone: Drone) => {
+    const draft = drafts[drone.id];
+    if (!draft) return;
+    const name = draft.name.trim();
+    const mac = normaliseMac(draft.mac);
+    if (!name) {
+      setCardErrors((prev) => ({ ...prev, [drone.id]: "Name required" }));
+      return;
+    }
+    if (!macIsValid(mac)) {
+      setCardErrors((prev) => ({
+        ...prev,
+        [drone.id]: "MAC must be AA:BB:CC:DD:EE:FF",
+      }));
+      return;
+    }
+    if (
+      fleet.some(
+        (other) => other.id !== drone.id && normaliseMac(other.mac) === mac
+      )
+    ) {
+      setCardErrors((prev) => ({
+        ...prev,
+        [drone.id]: "MAC already in fleet",
+      }));
+      return;
+    }
+    setCardErrors((prev) => ({ ...prev, [drone.id]: null }));
+    setDrafts((prev) => ({ ...prev, [drone.id]: { name, mac } }));
+    updateDrone(drone.id, { name, mac });
+  };
+
+  const revertDraft = (drone: Drone) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [drone.id]: { name: drone.name, mac: drone.mac },
+    }));
+    setCardErrors((prev) => ({ ...prev, [drone.id]: null }));
+  };
+
   const activeCount = fleet.filter((d) => d.active).length;
 
   return (
@@ -324,8 +411,10 @@ export default function DronesView() {
                     <Form.Control
                       size="sm"
                       type="text"
-                      value={drone.mac}
-                      onChange={(e) => updateDrone(drone.id, { mac: e.target.value })}
+                      value={drafts[drone.id]?.mac ?? drone.mac}
+                      onChange={(e) =>
+                        setDraftField(drone.id, { mac: e.target.value })
+                      }
                     />
                   </div>
 
@@ -334,8 +423,10 @@ export default function DronesView() {
                     <Form.Control
                       size="sm"
                       type="text"
-                      value={drone.name}
-                      onChange={(e) => updateDrone(drone.id, { name: e.target.value })}
+                      value={drafts[drone.id]?.name ?? drone.name}
+                      onChange={(e) =>
+                        setDraftField(drone.id, { name: e.target.value })
+                      }
                     />
                   </div>
 
@@ -367,7 +458,29 @@ export default function DronesView() {
                     <span className="drone-row-value">{formatLastSeen(drone.lastSeen)}</span>
                   </div>
 
+                  {cardErrors[drone.id] && (
+                    <div className="drone-row-error">
+                      <span className="form-error">{cardErrors[drone.id]}</span>
+                    </div>
+                  )}
+
                   <div className="drone-actions">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary"
+                      onClick={() => revertDraft(drone)}
+                      disabled={!isDirty(drone)}
+                    >
+                      Revert
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      onClick={() => commitDraft(drone)}
+                      disabled={!isDirty(drone)}
+                    >
+                      {isDirty(drone) ? "Update" : "Saved"}
+                    </button>
                     <button
                       type="button"
                       className="btn btn-sm btn-outline-danger"

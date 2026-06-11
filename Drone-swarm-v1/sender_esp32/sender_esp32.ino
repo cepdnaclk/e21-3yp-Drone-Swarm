@@ -1,20 +1,24 @@
 // Mocap PC <-> drone bridge (laptop-side ESP32, USB serial <-> ESP-NOW).
 //
 // Direction PC -> drone:
-//   Reads three line-based formats from USB serial @ 115200 and forwards as
+//   Reads four line-based formats from USB serial @ 115200 and forwards as
 //   a binary StatePacket (msg_type-tagged) via ESP-NOW @ 50 Hz to the drone:
 //
 //     "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed\n"  -> msg_type 0
 //     "P,<17 floats>\n"                                  -> msg_type 2 (PID + ground effect)
 //     "T,trim_t,trim_r,trim_p,trim_y\n"                  -> msg_type 3
+//     "M,AA:BB:CC:DD:EE:FF\n"                            -> retarget ESP-NOW peer (no packet sent)
 //
 //   State packets are streamed at the 50 Hz periodic timer. P/T packets are
-//   sent immediately on parse (rare events).
+//   sent immediately on parse (rare events). M lines change which drone the
+//   MoCap stream is aimed at -- used when the UI selects a different drone.
 //
 // Direction drone -> PC:
-//   ESP-NOW receives a binary TelemetryPacket (CRSF attitude relayed by the
-//   drone ESP32-C3), and prints "H<yaw_rad>\n" over USB serial so the Python
-//   backend can fuse heading.
+//   ESP-NOW receives a binary TelemetryPacket (CRSF attitude + pack battery
+//   relayed by the drone ESP32-C3). Prints two USB-serial lines per packet:
+//
+//     "H<yaw_rad>\n"                       -- for the heading reader (single-drone path)
+//     "B<src_mac>,<mv>,<pct>\n"            -- battery telemetry tagged with the drone's MAC
 //
 // Also: prints this board's STA MAC at boot so you can paste it into the
 // drone firmware's `senderAddress[]`.
@@ -49,11 +53,14 @@ typedef struct __attribute__((packed)) {
   uint32_t seq;
 } StatePacket;
 
-// MUST match the struct in drone_receiver_crsf_espnow.ino exactly.
+// MUST match the struct in receiver_esp32.ino exactly.
 typedef struct __attribute__((packed)) {
   int16_t  pitch_centirad;   // 1/10000 rad (CRSF native units)
   int16_t  roll_centirad;
   int16_t  yaw_centirad;
+  uint16_t battery_mv;       // pack voltage in millivolts (post-divider)
+  uint8_t  battery_pct;      // 0..100 linear
+  uint8_t  _pad;
   uint32_t seq;
 } TelemetryPacket;
 
@@ -150,12 +157,64 @@ static void parseTrimLine(const String &line) {
   esp_now_send(receiverAddress, (uint8_t *)&pkt, sizeof(pkt));
 }
 
+// Parse two hex nibbles starting at `idx` in `s`. Returns -1 on failure.
+static int parseHexByte(const String &s, int idx) {
+  if (idx + 1 >= (int)s.length()) return -1;
+  auto nib = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+  };
+  int hi = nib(s[idx]);
+  int lo = nib(s[idx + 1]);
+  if (hi < 0 || lo < 0) return -1;
+  return (hi << 4) | lo;
+}
+
+// "M,AA:BB:CC:DD:EE:FF" -> change which drone we ESP-NOW state packets to.
+// Re-adds the peer if needed. Silently ignored on parse failure.
+static void parseMacLine(const String &line) {
+  if (line.length() < 19) return;     // "M," + 17 chars MAC = 19
+  uint8_t mac[6];
+  int idx = 2;
+  for (int i = 0; i < 6; i++) {
+    int v = parseHexByte(line, idx);
+    if (v < 0) return;
+    mac[i] = (uint8_t)v;
+    idx += 2;
+    if (i < 5) {
+      if (idx >= (int)line.length() || (line[idx] != ':' && line[idx] != '-')) return;
+      idx += 1;
+    }
+  }
+
+  if (memcmp(mac, receiverAddress, 6) == 0) return;  // nothing to do
+
+  // Remove the old peer (ignore failure -- might not have been added yet),
+  // swap the target MAC in, and add the new peer.
+  esp_now_del_peer(receiverAddress);
+  memcpy(receiverAddress, mac, 6);
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);
+  peerInfo.channel = ESPNOW_CHANNEL;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to re-add ESP-NOW peer");
+    return;
+  }
+  Serial.printf("[sender] target -> %02X:%02X:%02X:%02X:%02X:%02X\n",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
 static void parseSerialLine(const String &line) {
   if (line.length() < 2 || line[1] != ',') return;
   switch (line[0]) {
     case 'S': parseStateLine(line); break;
     case 'P': parsePidLine(line);   break;
     case 'T': parseTrimLine(line);  break;
+    case 'M': parseMacLine(line);   break;
     default:                        break;
   }
 }
@@ -165,15 +224,24 @@ void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "ESP-NOW OK" : "ESP-NOW FAIL");
 }
 
-// Drone -> PC: decode TelemetryPacket and print yaw as "H<float>\n"
-// The Python backend (api/index.py) reads this in its heading reader thread.
+// Drone -> PC: decode TelemetryPacket. Prints two USB-serial lines:
+//   "H<float>\n"                          for the heading reader (single-drone path)
+//   "B<src_mac>,<mv>,<pct>\n"             battery telemetry tagged with the drone MAC
+// The Python backend reads both in its serial reader thread.
 void OnDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   if (len != sizeof(TelemetryPacket)) return;
   TelemetryPacket t;
   memcpy(&t, data, sizeof(t));
+
   float yaw_rad = (float)t.yaw_centirad / 10000.0f;
   Serial.print("H");
   Serial.println(yaw_rad, 4);
+
+  const uint8_t *m = info->src_addr;
+  Serial.printf("B%02X:%02X:%02X:%02X:%02X:%02X,%u,%u\n",
+                m[0], m[1], m[2], m[3], m[4], m[5],
+                (unsigned)t.battery_mv,
+                (unsigned)t.battery_pct);
 }
 
 void setup() {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, Col, Form, Row } from "react-bootstrap";
 
 import { socket } from "../shared/styles/scripts/socket";
@@ -18,12 +18,15 @@ type Drone = {
 
 const STORAGE_KEY = "drone-swarm-fleet-v1";
 
+const normaliseMac = (mac: string) =>
+  mac.trim().toUpperCase().replace(/-/g, ":");
+
 const macIsValid = (mac: string) =>
   /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac.trim());
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
-const loadFleet = (): Drone[] => {
+const loadCachedFleet = (): Drone[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
@@ -35,7 +38,7 @@ const loadFleet = (): Drone[] => {
   return [];
 };
 
-const saveFleet = (fleet: Drone[]) => {
+const saveCachedFleet = (fleet: Drone[]) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(fleet));
   } catch {
@@ -63,15 +66,65 @@ const batteryTone = (battery: number | null) => {
 };
 
 export default function DronesView() {
-  const [fleet, setFleet] = useState<Drone[]>(loadFleet);
+  const [fleet, setFleet] = useState<Drone[]>(loadCachedFleet);
   const [draftName, setDraftName] = useState("");
   const [draftMac, setDraftMac] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
+  // Becomes true once we've heard the canonical fleet from the backend (or have
+  // taken a local action). Until then, edits aren't broadcast to avoid clobbering
+  // the server's view with our cached state on first connect.
+  const hydratedRef = useRef(false);
+  const suppressNextEmitRef = useRef(false);
 
   useEffect(() => {
-    saveFleet(fleet);
+    const onFleet = (data: { drones?: Drone[] }) => {
+      const incoming = Array.isArray(data?.drones) ? data.drones : [];
+      setFleet((prev) => {
+        // Merge: server is source of truth for membership + name + active flag;
+        // we keep our runtime telemetry (battery/pos/state/lastSeen) locally.
+        const byMac: Record<string, Drone> = {};
+        prev.forEach((d) => {
+          byMac[normaliseMac(d.mac)] = d;
+        });
+        const merged: Drone[] = incoming.map((entry: any) => {
+          const mac = normaliseMac(String(entry.mac ?? ""));
+          const existing = byMac[mac];
+          return {
+            id: String(entry.id ?? mac.replace(/:/g, "").toLowerCase()),
+            name: String(entry.name ?? mac),
+            mac,
+            active: Boolean(entry.active),
+            battery: existing?.battery ?? null,
+            pos: existing?.pos ?? null,
+            state: existing?.state ?? "OFFLINE",
+            lastSeen: existing?.lastSeen ?? null,
+          };
+        });
+        suppressNextEmitRef.current = true;
+        return merged;
+      });
+      hydratedRef.current = true;
+    };
+    socket.on("fleet", onFleet);
+    return () => {
+      socket.off("fleet", onFleet);
+    };
+  }, []);
+
+  useEffect(() => {
+    saveCachedFleet(fleet);
+    if (!hydratedRef.current) return;
+    if (suppressNextEmitRef.current) {
+      suppressNextEmitRef.current = false;
+      return;
+    }
     socket.emit("drone-fleet-update", {
-      drones: fleet.map((d) => ({ id: d.id, mac: d.mac, active: d.active })),
+      drones: fleet.map((d) => ({
+        id: d.id,
+        name: d.name,
+        mac: d.mac,
+        active: d.active,
+      })),
     });
   }, [fleet]);
 
@@ -80,12 +133,17 @@ export default function DronesView() {
       id?: string;
       mac?: string;
       battery?: number;
+      battery_mv?: number;
       pos?: [number, number, number];
       state?: string;
     }) => {
-      setFleet((prev) =>
-        prev.map((d) => {
-          const matches = (data.id && data.id === d.id) || (data.mac && data.mac === d.mac);
+      const dataMac = data.mac ? normaliseMac(data.mac) : null;
+      setFleet((prev) => {
+        suppressNextEmitRef.current = true;
+        return prev.map((d) => {
+          const matches =
+            (data.id && data.id === d.id) ||
+            (dataMac && dataMac === normaliseMac(d.mac));
           if (!matches) return d;
           return {
             ...d,
@@ -94,8 +152,8 @@ export default function DronesView() {
             state: data.state ?? d.state,
             lastSeen: Date.now(),
           };
-        })
-      );
+        });
+      });
     };
     socket.on("drone-telemetry", onTelemetry);
     return () => {
@@ -110,9 +168,17 @@ export default function DronesView() {
     return () => clearInterval(id);
   }, []);
 
+  // Wraps setFleet so that user edits ALWAYS reach the server, even right after
+  // a telemetry packet or a fleet broadcast (which set suppressNextEmitRef).
+  const userEdit = (updater: (prev: Drone[]) => Drone[]) => {
+    hydratedRef.current = true;
+    suppressNextEmitRef.current = false;
+    setFleet(updater);
+  };
+
   const addDrone = () => {
     const name = draftName.trim();
-    const mac = draftMac.trim();
+    const mac = normaliseMac(draftMac);
     if (!name) {
       setDraftError("Name required");
       return;
@@ -121,11 +187,11 @@ export default function DronesView() {
       setDraftError("MAC must be AA:BB:CC:DD:EE:FF");
       return;
     }
-    if (fleet.some((d) => d.mac.toLowerCase() === mac.toLowerCase())) {
+    if (fleet.some((d) => normaliseMac(d.mac) === mac)) {
       setDraftError("MAC already in fleet");
       return;
     }
-    setFleet((prev) => [
+    userEdit((prev) => [
       ...prev,
       {
         id: makeId(),
@@ -144,10 +210,10 @@ export default function DronesView() {
   };
 
   const updateDrone = (id: string, patch: Partial<Drone>) =>
-    setFleet((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+    userEdit((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
 
   const removeDrone = (id: string) =>
-    setFleet((prev) => prev.filter((d) => d.id !== id));
+    userEdit((prev) => prev.filter((d) => d.id !== id));
 
   const activeCount = fleet.filter((d) => d.active).length;
 

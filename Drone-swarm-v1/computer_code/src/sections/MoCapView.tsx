@@ -8,6 +8,16 @@ import { OrbitControls, Stats } from "@react-three/drei";
 import CameraWireframe from "../components/CameraWireframe";
 import { socket } from "../shared/styles/scripts/socket";
 
+type FleetEntry = {
+  id: string;
+  name: string;
+  mac: string;
+  active: boolean;
+};
+
+const normaliseMac = (mac: string) =>
+  mac.trim().toUpperCase().replace(/-/g, ":");
+
 const PID_LABELS = [
   "Kp pos xy", "Ki pos xy", "Kd pos xy",
   "Kp pos z", "Ki pos z", "Kd pos z",
@@ -67,6 +77,35 @@ export default function MoCapView() {
   const [dronePID, setDronePID] = useState<string[]>(DEFAULT_PID);
   const [droneSetpoint, setDroneSetpoint] = useState<string[]>(["0", "0", "0.20"]);
   const [droneTrim, setDroneTrim] = useState<string[]>(["0", "0", "0", "0"]);
+
+  const [fleet, setFleet] = useState<FleetEntry[]>([]);
+  const [selectedMac, setSelectedMac] = useState<string>("");
+
+  useEffect(() => {
+    const onFleet = (data: { drones?: FleetEntry[]; selected_mac?: string | null }) => {
+      const drones = Array.isArray(data?.drones)
+        ? data.drones.map((d) => ({ ...d, mac: normaliseMac(d.mac) }))
+        : [];
+      setFleet(drones);
+      if (data.selected_mac) {
+        setSelectedMac(normaliseMac(data.selected_mac));
+      } else if (!selectedMac && drones.length > 0) {
+        const firstActive = drones.find((d) => d.active) ?? drones[0];
+        setSelectedMac(firstActive.mac);
+      }
+    };
+    socket.on("fleet", onFleet);
+    return () => {
+      socket.off("fleet", onFleet);
+    };
+  }, [selectedMac]);
+
+  const handleSelectDrone = (mac: string) => {
+    setSelectedMac(mac);
+    if (mac) {
+      socket.emit("mocap-select-drone", { mac });
+    }
+  };
 
   useEffect(() => {
     socket.on("camera-pose", (data) => {
@@ -132,6 +171,34 @@ export default function MoCapView() {
           </div>
           <h2 className="app-title">MoCap single drone</h2>
         </Col>
+        <Col md="auto" className="mocap-drone-select">
+          <Form.Label className="mocap-drone-select-label">Drone</Form.Label>
+          {fleet.length === 0 ? (
+            <span className="mocap-drone-empty">
+              No drones registered — add one in the Drones section.
+            </span>
+          ) : (
+            <Form.Select
+              size="sm"
+              value={selectedMac}
+              onChange={(e) => handleSelectDrone(e.target.value)}
+            >
+              <option value="" disabled>
+                Select a drone
+              </option>
+              {fleet.map((d) => (
+                <option
+                  key={d.mac}
+                  value={d.mac}
+                  disabled={!d.active}
+                >
+                  {d.name} — {d.mac}
+                  {d.active ? "" : " (standby)"}
+                </option>
+              ))}
+            </Form.Select>
+          )}
+        </Col>
         <Col>
           <div className="status-strip">
             <span className="status-pill">
@@ -157,6 +224,7 @@ export default function MoCapView() {
             type="button"
             className={`btn ${saveStatus === "saved" ? "btn-success" : "btn-primary"}`}
             onClick={saveSettings}
+            disabled={!selectedMac && fleet.length > 0}
           >
             {saveStatus === "saved" ? "Saved" : "Save settings"}
           </button>

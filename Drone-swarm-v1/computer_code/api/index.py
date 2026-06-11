@@ -23,6 +23,7 @@ Environment:
 
 import json
 import os
+import re
 import threading
 import time
 
@@ -49,6 +50,53 @@ CONTROL_HZ = 60.0
 EMIT_HZ = 30.0
 HEADING_LPF_CUTOFF = 8.0
 HEADING_LPF_FS = 50.0       # the drone ESP-NOWs heading at 50 Hz
+
+FLEET_FILE = os.path.join(os.path.dirname(__file__), "fleet.json")
+_MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$")
+
+
+def _normalise_mac(mac: str) -> str:
+    return mac.strip().upper().replace("-", ":")
+
+
+def _load_fleet():
+    try:
+        with open(FLEET_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return []
+        out = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            mac = _normalise_mac(str(entry.get("mac", "")))
+            if not _MAC_RE.match(mac):
+                continue
+            out.append({
+                "id": str(entry.get("id") or mac.replace(":", "").lower()),
+                "name": str(entry.get("name") or mac),
+                "mac": mac,
+                "active": bool(entry.get("active", True)),
+            })
+        return out
+    except FileNotFoundError:
+        return []
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[fleet] failed to load {FLEET_FILE}: {e}")
+        return []
+
+
+def _save_fleet(fleet):
+    try:
+        with open(FLEET_FILE, "w", encoding="utf-8") as f:
+            json.dump(fleet, f, indent=2)
+    except OSError as e:
+        print(f"[fleet] failed to save {FLEET_FILE}: {e}")
+
+
+_fleet_lock = threading.Lock()
+_fleet = _load_fleet()
+_selected_drone_mac = None  # which drone the MoCap section is currently controlling
 
 
 # =========================
@@ -120,7 +168,7 @@ def _serial_write(payload: bytes):
 
 def _heading_reader_loop():
     global _latest_heading, _latest_heading_t
-    print("[heading] reader started")
+    print("[serial] reader started")
     while True:
         if _ser is None or not _ser.is_open:
             time.sleep(0.5)
@@ -128,19 +176,41 @@ def _heading_reader_loop():
         try:
             line = _ser.readline().decode(errors="ignore").strip()
         except Exception as e:
-            print(f"[heading] read failed: {e}")
+            print(f"[serial] read failed: {e}")
             time.sleep(0.5)
             continue
-        if not line.startswith("H"):
+        if not line:
             continue
-        try:
-            yaw = float(line[1:])
-        except ValueError:
-            continue
-        filt = _heading_lpf.filter(np.array([yaw], dtype=np.float64))[0]
-        with _heading_lock:
-            _latest_heading = float(filt)
-            _latest_heading_t = time.perf_counter()
+
+        if line.startswith("H"):
+            # Backward-compat heading line (single-drone): "H<yaw_rad>"
+            try:
+                yaw = float(line[1:])
+            except ValueError:
+                continue
+            filt = _heading_lpf.filter(np.array([yaw], dtype=np.float64))[0]
+            with _heading_lock:
+                _latest_heading = float(filt)
+                _latest_heading_t = time.perf_counter()
+
+        elif line.startswith("B"):
+            # "B<mac>,<mv>,<pct>" — battery telemetry tagged with source MAC.
+            parts = line[1:].split(",")
+            if len(parts) < 3:
+                continue
+            mac = _normalise_mac(parts[0])
+            if not _MAC_RE.match(mac):
+                continue
+            try:
+                mv = int(parts[1])
+                pct = max(0, min(100, int(float(parts[2]))))
+            except ValueError:
+                continue
+            socketio.emit("drone-telemetry", {
+                "mac": mac,
+                "battery": pct,
+                "battery_mv": mv,
+            })
 
 
 # =========================
@@ -282,6 +352,62 @@ def on_connect():
     socketio.emit("camera-pose", {"camera_poses": poses})
     socketio.emit("to-world-coords-matrix",
                   {"to_world_coords_matrix": cameras.world_matrix_4x4_metres()})
+    with _fleet_lock:
+        socketio.emit("fleet", {"drones": list(_fleet),
+                                "selected_mac": _selected_drone_mac})
+
+
+@socketio.on("drone-fleet-update")
+def on_fleet_update(data):
+    """Persist the user's edits to fleet.json and rebroadcast to all clients."""
+    global _fleet
+    if not isinstance(data, dict):
+        return
+    raw = data.get("drones")
+    if not isinstance(raw, list):
+        return
+    cleaned = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        mac = _normalise_mac(str(entry.get("mac", "")))
+        if not _MAC_RE.match(mac) or mac in seen:
+            continue
+        seen.add(mac)
+        cleaned.append({
+            "id": str(entry.get("id") or mac.replace(":", "").lower()),
+            "name": str(entry.get("name") or mac),
+            "mac": mac,
+            "active": bool(entry.get("active", True)),
+        })
+    with _fleet_lock:
+        _fleet = cleaned
+        _save_fleet(_fleet)
+        socketio.emit("fleet", {"drones": list(_fleet),
+                                "selected_mac": _selected_drone_mac})
+
+
+@socketio.on("mocap-select-drone")
+def on_mocap_select_drone(data):
+    """Switch the MoCap target. Forwards the MAC to the sender ESP32 as
+    'M,<mac>\\n' so it re-aims its ESP-NOW peer."""
+    global _selected_drone_mac
+    if not isinstance(data, dict):
+        return
+    mac = _normalise_mac(str(data.get("mac", "")))
+    if not _MAC_RE.match(mac):
+        return
+    with _fleet_lock:
+        known = any(d["mac"] == mac for d in _fleet)
+    if not known:
+        print(f"[mocap] refusing to select unknown MAC {mac}")
+        return
+    _selected_drone_mac = mac
+    _serial_write(f"M,{mac}\n".encode("ascii"))
+    socketio.emit("fleet", {"drones": list(_fleet),
+                            "selected_mac": _selected_drone_mac})
+    print(f"[mocap] selected drone {mac}")
 
 
 @socketio.on("arm-drone")

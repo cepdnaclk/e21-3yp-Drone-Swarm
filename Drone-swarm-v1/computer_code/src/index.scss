@@ -194,6 +194,27 @@ body {
   font-size: 0.82rem;
 }
 
+.mocap-drone-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 240px;
+}
+
+.mocap-drone-select-label {
+  margin: 0;
+  color: var(--accent-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mocap-drone-empty {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 .empty-state {
   padding: 1.4rem;
   border: 1px dashed rgba(255, 255, 255, 0.12);

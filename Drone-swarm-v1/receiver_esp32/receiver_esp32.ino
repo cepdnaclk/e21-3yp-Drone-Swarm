@@ -37,6 +37,20 @@
 #define ROTOR_RADIUS 0.0225
 #define Z_GAIN 0.7
 #define ARM_DELAY_MS 100
+
+// ---- Battery sense ----
+// Wire the battery + lead through a resistor divider to an ADC pin on the C3.
+// The divider scales the raw pack voltage down to <= 3.3 V at the pin.
+// BATTERY_DIVIDER is V_batt / V_adc.  For a 47k / 10k divider this is ~5.7.
+// Set BATTERY_DIVIDER = 1.0 if you sense the cell directly (1S only).
+// BATTERY_MIN_MV / BATTERY_MAX_MV define 0% and 100% on the pack.
+// Defaults below assume a 1S LiPo (3.30 V empty, 4.20 V full) sensed direct.
+#define BATTERY_ADC_PIN     4
+#define BATTERY_DIVIDER     1.0f
+#define BATTERY_MIN_MV      3300
+#define BATTERY_MAX_MV      4200
+#define BATTERY_SAMPLE_MS   100
+#define BATTERY_EMA_ALPHA   0.2f
 // =================================================
 
 // Sender ESP32's STA MAC. Replace with the MAC printed at boot by
@@ -62,15 +76,20 @@ typedef struct __attribute__((packed)) {
   int16_t  pitch_centirad;
   int16_t  roll_centirad;
   int16_t  yaw_centirad;
+  uint16_t battery_mv;       // pack voltage in millivolts (post-divider corrected)
+  uint8_t  battery_pct;      // 0..100, linear between BATTERY_MIN_MV..BATTERY_MAX_MV
+  uint8_t  _pad;             // keeps the struct 4-byte aligned
   uint32_t seq;
 } TelemetryPacket;
 
-TelemetryPacket telem = {0, 0, 0, 0};
+TelemetryPacket telem = {0, 0, 0, 0, 0, 0, 0};
 uint32_t lastRecvTime = 0;
 uint32_t lastTelemSend = 0;
 uint32_t lastCRSFSend = 0;
+uint32_t lastBatterySample = 0;
 uint32_t lastLoopTime = 0;
 uint16_t channels[16];
+float    batteryMvFiltered = 0.0f;   // EMA-filtered pack mV
 
 // ---------------- PID state ----------------
 
@@ -106,6 +125,33 @@ PID yawPosPID(&yawPos, &yawPosOutput, &yawPosSetpoint, yawPosKp, yawPosKi, yawPo
 PID xVelPID(&xVel, &xVelOutput, &xVelSetpoint, xyVelKp, xyVelKi, xyVelKd, DIRECT);
 PID yVelPID(&yVel, &yVelOutput, &yVelSetpoint, xyVelKp, xyVelKi, xyVelKd, DIRECT);
 PID zVelPID(&zVel, &zVelOutput, &zVelSetpoint, zVelKp,  zVelKi,  zVelKd,  DIRECT);
+
+// Read battery pack voltage via the ADC divider, EMA-filter it, and update
+// telem.battery_mv / telem.battery_pct.  Call from loop() at BATTERY_SAMPLE_MS.
+void sampleBattery() {
+  // analogReadMilliVolts handles per-chip ADC calibration on ESP32-C3.
+  uint32_t mvAtPin = analogReadMilliVolts(BATTERY_ADC_PIN);
+  float mvPack = (float)mvAtPin * BATTERY_DIVIDER;
+  if (batteryMvFiltered <= 0.0f) {
+    batteryMvFiltered = mvPack;
+  } else {
+    batteryMvFiltered = BATTERY_EMA_ALPHA * mvPack
+                       + (1.0f - BATTERY_EMA_ALPHA) * batteryMvFiltered;
+  }
+  uint32_t mv = (uint32_t)batteryMvFiltered;
+  if (mv > 65535) mv = 65535;
+  telem.battery_mv = (uint16_t)mv;
+
+  int32_t span = (int32_t)BATTERY_MAX_MV - (int32_t)BATTERY_MIN_MV;
+  if (span <= 0) {
+    telem.battery_pct = 0;
+  } else {
+    int32_t pct = ((int32_t)mv - (int32_t)BATTERY_MIN_MV) * 100 / span;
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    telem.battery_pct = (uint8_t)pct;
+  }
+}
 
 // Forces an integrator reset by walking the output limits across the current value.
 // This is the same trick the original drone-side firmware used at disarm.
@@ -333,10 +379,13 @@ void setup() {
   yVelPID.SetOutputLimits(-1, 1);
   zVelPID.SetOutputLimits(-1, 1);
 
-  lastRecvTime  = millis();
-  lastTelemSend = millis();
-  lastCRSFSend  = millis();
-  lastLoopTime  = micros();
+  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);  // ~0..3.1V usable
+
+  lastRecvTime      = millis();
+  lastTelemSend     = millis();
+  lastCRSFSend      = millis();
+  lastBatterySample = millis();
+  lastLoopTime      = micros();
 
   Serial.println("Receiver ready: ESP-NOW state -> PID -> CRSF; CRSF telem -> ESP-NOW");
 }
@@ -427,14 +476,21 @@ void loop() {
     sendCRSF();
   }
 
-  // 5) Periodically forward latest attitude to laptop at ~50 Hz.
+  // 5) Sample battery at BATTERY_SAMPLE_MS so battery_mv / battery_pct in telem
+  //    are always fresh before the next ESP-NOW send.
+  if (millis() - lastBatterySample >= BATTERY_SAMPLE_MS) {
+    lastBatterySample = millis();
+    sampleBattery();
+  }
+
+  // 6) Periodically forward latest attitude + battery to laptop at ~50 Hz.
   if (millis() - lastTelemSend >= TELEMETRY_PERIOD_MS) {
     lastTelemSend = millis();
     telem.seq++;
     esp_now_send(senderAddress, (uint8_t *)&telem, sizeof(telem));
   }
 
-  // 6) Pace the main loop at ~500 Hz. 2 ms is the right granularity on C3
+  // 7) Pace the main loop at ~500 Hz. 2 ms is the right granularity on C3
   // and matches the spec's "delay(2)" hint without busy-spinning.
   uint32_t now = micros();
   uint32_t elapsed = now - lastLoopTime;

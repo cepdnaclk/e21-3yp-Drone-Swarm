@@ -46,6 +46,25 @@ from KalmanFilter import KalmanFilter
 from LowPassFilter import LowPassFilter
 
 
+def _load_local_env():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        return
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+    except Exception as e:
+        print(f"[env] WARNING: failed to load {env_path}: {e}")
+
+
+_load_local_env()
+
+
 # =========================
 # Config
 # =========================
@@ -82,6 +101,9 @@ controller = Controller()
 _ser = None
 _udp_sock = None
 _ser_lock = threading.Lock()           # guards _ser.write() only; reads are on their own thread
+_sender_connected_logged = False
+_last_sender_drop_log_t = 0.0
+_last_serial_retry_t = 0.0
 _heading_lock = threading.Lock()
 _latest_heading = None                 # float rad, post-LPF
 _latest_heading_t = 0.0
@@ -109,9 +131,9 @@ def _open_serial():
         return _ser
     try:
         _ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=0.1, write_timeout=0.1)
-        print(f"[serial] opened {SERIAL_PORT} @ {SERIAL_BAUD}")
+        print(f"[sender] serial connected: {SERIAL_PORT} @ {SERIAL_BAUD}")
     except Exception as e:
-        print(f"[serial] WARNING: failed to open {SERIAL_PORT}: {e}")
+        print(f"[sender] WARNING: failed to connect serial sender on {SERIAL_PORT}: {e}")
         _ser = None
     return _ser
 
@@ -123,14 +145,15 @@ def _open_udp():
     try:
         _udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         _udp_sock.setblocking(False)
-        print(f"[udp] sender target {SENDER_UDP_HOST}:{SENDER_UDP_PORT}")
+        print(f"[sender] UDP target ready: {SENDER_UDP_HOST}:{SENDER_UDP_PORT}")
     except Exception as e:
-        print(f"[udp] WARNING: failed to open UDP socket: {e}")
+        print(f"[sender] WARNING: failed to open UDP sender socket: {e}")
         _udp_sock = None
     return _udp_sock
 
 
 def _serial_write(payload: bytes):
+    global _sender_connected_logged, _last_sender_drop_log_t, _last_serial_retry_t
     if not payload:
         return
     if SENDER_TRANSPORT == "udp":
@@ -139,17 +162,32 @@ def _serial_write(payload: bytes):
             return
         try:
             sock.sendto(payload, (SENDER_UDP_HOST, SENDER_UDP_PORT))
+            if not _sender_connected_logged:
+                print(f"[sender] UDP packets sending to ESP32 AP at {SENDER_UDP_HOST}:{SENDER_UDP_PORT}")
+                _sender_connected_logged = True
         except Exception as e:
-            print(f"[udp] send failed: {e}")
+            print(f"[sender] UDP send failed: {e}")
         return
 
     if _ser is None or not _ser.is_open:
+        now = time.perf_counter()
+        if now - _last_serial_retry_t > 1.0:
+            _last_serial_retry_t = now
+            _open_serial()
+        if _ser is None or not _ser.is_open:
+            if now - _last_sender_drop_log_t > 2.0:
+                _last_sender_drop_log_t = now
+                print(f"[sender] serial sender not connected on {SERIAL_PORT}; dropping packets")
+            return
         return
     try:
         with _ser_lock:
             _ser.write(payload)
+        if not _sender_connected_logged:
+            print(f"[sender] serial packets sending to ESP32 on {SERIAL_PORT}")
+            _sender_connected_logged = True
     except Exception as e:
-        print(f"[serial] write failed: {e}")
+        print(f"[sender] serial write failed: {e}")
 
 
 # =========================
@@ -433,6 +471,7 @@ def on_triangulate_points(_data):
 # =========================
 
 def _start_background_threads():
+    print(f"[sender] transport={SENDER_TRANSPORT}")
     if SENDER_TRANSPORT == "udp":
         _open_udp()
     else:

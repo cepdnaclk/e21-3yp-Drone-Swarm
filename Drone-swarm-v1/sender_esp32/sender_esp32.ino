@@ -38,6 +38,10 @@ uint8_t receiverAddress[] = { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
 #define AP_PASS "drone1234"
 #define UDP_PORT 4210
 #define AP_MAX_CLIENTS 4
+
+// Set to 1 to test only the WiFi AP. Use this if the laptop cannot see the
+// SSID. Once the SSID is stable, set back to 0 for UDP/ESP-NOW bridge mode.
+#define AP_DIAGNOSTIC_ONLY 1
 // =================================================
 
 // Tagged ESP-NOW packet. msg_type selects which fields the receiver applies.
@@ -268,6 +272,11 @@ void setup() {
                 staMac[0], staMac[1], staMac[2],
                 staMac[3], staMac[4], staMac[5]);
 
+#if AP_DIAGNOSTIC_ONLY
+  Serial.println("[sender] AP_DIAGNOSTIC_ONLY=1; ESP-NOW bridge is disabled");
+  return;
+#endif
+
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
@@ -296,6 +305,12 @@ void setup() {
 
 void loop() {
   checkAccessPoint();
+
+#if AP_DIAGNOSTIC_ONLY
+  delay(10);
+  return;
+#endif
+
   pollUdpCommands();
 
   while (Serial.available()) {

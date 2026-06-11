@@ -138,6 +138,12 @@ export default function MoCapView() {
     socket.emit("set-drone-setpoint", { droneSetpoint: droneSetpoint.map((x) => parseFloat(x)) });
   }, [droneSetpoint]);
 
+  useEffect(() => {
+    socket.emit("update-camera-settings", {
+      thresholds: cameraThresholds.map((v) => Math.round(v)),
+    });
+  }, [cameraThresholds]);
+
   const saveSettings = () => {
     socket.emit("update-camera-settings", {
       thresholds: cameraThresholds.map((v) => Math.round(v)),

@@ -331,9 +331,6 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  setSafeChannels();
-  CRSFSerial.begin(420000, SERIAL_8N1, CRSF_RX_PIN, CRSF_TX_PIN);
-
   WiFi.mode(WIFI_STA);
   WiFi.setChannel(ESPNOW_CHANNEL);
 
@@ -345,6 +342,9 @@ void setup() {
   Serial.printf("[receiver] STA MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
                 staMac[0], staMac[1], staMac[2],
                 staMac[3], staMac[4], staMac[5]);
+
+  setSafeChannels();
+  CRSFSerial.begin(420000, SERIAL_8N1, CRSF_RX_PIN, CRSF_TX_PIN);
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW init failed");

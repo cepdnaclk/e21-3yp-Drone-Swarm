@@ -292,7 +292,7 @@ class Tracker:
         self.camera_indices = camera_indices or list(DEFAULT_CAMERA_INDICES)
         self.cam_width = cam_width
         self.cam_height = cam_height
-        self.threshold = threshold
+        self.thresholds = [int(threshold)] * len(self.camera_indices)
         self.min_blob_area = min_blob_area
         self.max_blob_area = max_blob_area
 
@@ -365,7 +365,15 @@ class Tracker:
             return self._fps_ema
 
     def set_threshold(self, value):
-        self.threshold = int(np.clip(value, 0, 255))
+        v = int(np.clip(value, 0, 255))
+        self.thresholds = [v] * len(self.camera_indices)
+
+    def set_thresholds(self, values):
+        n = len(self.camera_indices)
+        clipped = [int(np.clip(v, 0, 255)) for v in values[:n]]
+        if len(clipped) < n:
+            clipped += [clipped[-1] if clipped else DEFAULT_THRESHOLD] * (n - len(clipped))
+        self.thresholds = clipped
 
     # ---- frontend wireframe helpers ----
 
@@ -432,14 +440,15 @@ class Tracker:
                     frames.append(frame)
                     continue
 
+                th = self.thresholds[i] if i < len(self.thresholds) else DEFAULT_THRESHOLD
                 point = _detect_bright_spot(
-                    frame, self.threshold, self.min_blob_area, self.max_blob_area
+                    frame, th, self.min_blob_area, self.max_blob_area
                 )
                 if point is not None:
                     detected[i] = point
                     detect_count[i] += 1
 
-                _annotate(frame, DEFAULT_CAMERA_NAMES[i], point, self.threshold)
+                _annotate(frame, DEFAULT_CAMERA_NAMES[i], point, th)
                 frames.append(frame)
 
             # Triangulate

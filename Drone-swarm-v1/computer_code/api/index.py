@@ -349,8 +349,15 @@ def on_set_trim(data):
 
 @socketio.on("update-camera-settings")
 def on_camera_settings(data):
-    # Webcams: only threshold is meaningfully settable through this path.
-    if isinstance(data, dict) and "threshold" in data:
+    # Webcams: thresholds are settable per-camera (preferred) or as a single value.
+    if not isinstance(data, dict):
+        return
+    if "thresholds" in data and isinstance(data["thresholds"], list):
+        try:
+            cameras.set_thresholds([int(v) for v in data["thresholds"]])
+        except (ValueError, TypeError):
+            pass
+    elif "threshold" in data:
         try:
             cameras.set_threshold(int(data["threshold"]))
         except (ValueError, TypeError):

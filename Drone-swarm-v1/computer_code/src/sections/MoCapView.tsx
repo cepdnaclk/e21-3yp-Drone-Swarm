@@ -38,9 +38,15 @@ type DroneState = {
   tracker_fresh: boolean;
 };
 
+const NUM_CAMERAS = 4;
+const DEFAULT_THRESHOLD = 180;
+
 export default function MoCapView() {
   const [cameraStreamRunning, setCameraStreamRunning] = useState(false);
-  const [threshold, setThreshold] = useState(180);
+  const [cameraThresholds, setCameraThresholds] = useState<number[]>(
+    () => Array(NUM_CAMERAS).fill(DEFAULT_THRESHOLD),
+  );
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
 
   const [cameraPoses, setCameraPoses] = useState<{ R: number[][]; t: number[] }[]>([]);
   const [, setToWorldCoordsMatrix] = useState<number[][] | null>(null);
@@ -86,10 +92,6 @@ export default function MoCapView() {
   }, [droneArmed]);
 
   useEffect(() => {
-    socket.emit("set-drone-pid", { dronePID: dronePID.map((x) => parseFloat(x)) });
-  }, [dronePID]);
-
-  useEffect(() => {
     socket.emit("set-drone-trim", { droneTrim: droneTrim.map((x) => parseInt(x, 10)) });
   }, [droneTrim]);
 
@@ -97,9 +99,14 @@ export default function MoCapView() {
     socket.emit("set-drone-setpoint", { droneSetpoint: droneSetpoint.map((x) => parseFloat(x)) });
   }, [droneSetpoint]);
 
-  useEffect(() => {
-    socket.emit("update-camera-settings", { threshold });
-  }, [threshold]);
+  const saveSettings = () => {
+    socket.emit("update-camera-settings", {
+      thresholds: cameraThresholds.map((v) => Math.round(v)),
+    });
+    socket.emit("set-drone-pid", { dronePID: dronePID.map((x) => parseFloat(x)) });
+    setSaveStatus("saved");
+    window.setTimeout(() => setSaveStatus("idle"), 1500);
+  };
 
   const fmt = (x: number | null | undefined, digits = 3) =>
     x === null || x === undefined || Number.isNaN(x) ? "-" : x.toFixed(digits);
@@ -145,6 +152,15 @@ export default function MoCapView() {
             </span>
           </div>
         </Col>
+        <Col md="auto">
+          <button
+            type="button"
+            className={`btn ${saveStatus === "saved" ? "btn-success" : "btn-primary"}`}
+            onClick={saveSettings}
+          >
+            {saveStatus === "saved" ? "Saved" : "Save settings"}
+          </button>
+        </Col>
       </Row>
 
       <Row className="g-4">
@@ -158,19 +174,11 @@ export default function MoCapView() {
                 <Col className="panel-toolbar">
                   <button
                     type="button"
-                    className={`btn btn-sm me-3 ${cameraStreamRunning ? "btn-outline-danger" : "btn-outline-primary"}`}
+                    className={`btn btn-sm ${cameraStreamRunning ? "btn-outline-danger" : "btn-outline-primary"}`}
                     onClick={() => setCameraStreamRunning(!cameraStreamRunning)}
                   >
                     {cameraStreamRunning ? "Stop" : "Start"}
                   </button>
-                  <Form.Range
-                    min={0}
-                    max={250}
-                    value={threshold}
-                    className="threshold-slider"
-                    onChange={(e) => setThreshold(parseInt(e.target.value, 10))}
-                  />
-                  <span className="threshold-readout">threshold {threshold}</span>
                 </Col>
               </Row>
               <Row className="mt-3 panel-content" style={{ minHeight: 320 }}>
@@ -186,6 +194,30 @@ export default function MoCapView() {
                   )}
                 </Col>
               </Row>
+              <h6 className="section-subhead mt-3">Per-camera thresholds</h6>
+              {cameraThresholds.map((value, i) => (
+                <Row key={i} className="align-items-center mb-1">
+                  <Col xs={2}>
+                    <small>cam{i + 1}</small>
+                  </Col>
+                  <Col>
+                    <Form.Range
+                      min={0}
+                      max={250}
+                      value={value}
+                      className="threshold-slider"
+                      onChange={(e) => {
+                        const next = cameraThresholds.slice();
+                        next[i] = parseInt(e.target.value, 10);
+                        setCameraThresholds(next);
+                      }}
+                    />
+                  </Col>
+                  <Col xs={2} className="text-end">
+                    <span className="threshold-readout">{value}</span>
+                  </Col>
+                </Row>
+              ))}
             </Card.Body>
           </Card>
         </Col>

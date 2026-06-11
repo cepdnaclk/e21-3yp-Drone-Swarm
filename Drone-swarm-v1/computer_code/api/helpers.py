@@ -45,6 +45,9 @@ class Cameras:
     def set_threshold(self, value):
         self.tracker.set_threshold(value)
 
+    def set_thresholds(self, values):
+        self.tracker.set_thresholds(values)
+
     # ---- frontend init payload ----
 
     def camera_poses_in_world(self):

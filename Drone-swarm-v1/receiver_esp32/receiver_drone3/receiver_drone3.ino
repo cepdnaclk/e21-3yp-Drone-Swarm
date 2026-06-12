@@ -1,4 +1,4 @@
-// Mocap drone-side ESP32-C3.
+// Mocap drone-side ESP32-C3 -- DRONE 3 (STA MAC 11:00:3B:B1:5B:8D).
 // ESP-NOW <-> CRSF bridge + CRSF telemetry relay back to the laptop +
 // nested PID stack (position -> velocity -> stick PWM) running on-board.
 //
@@ -38,7 +38,7 @@
 
 #define MAX_VEL 100.0
 #define ROTOR_RADIUS 0.0225
-#define Z_GAIN 0.7
+#define Z_GAIN 1.5
 #define ARM_DELAY_MS 100
 
 // ---- Battery ----
@@ -333,7 +333,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setChannel(ESPNOW_CHANNEL);
 
-  uint8_t newMAC[] = { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
+  uint8_t newMAC[] = { 0x11, 0x00, 0x3B, 0xB1, 0x5B, 0x8D };
   esp_wifi_set_mac(WIFI_IF_STA, newMAC);
 
   uint8_t staMac[6];

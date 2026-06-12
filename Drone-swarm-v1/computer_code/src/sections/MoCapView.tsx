@@ -121,6 +121,13 @@ export default function MoCapView() {
   const [fleet, setFleet] = useState<FleetEntry[]>([]);
   const [selectedMac, setSelectedMac] = useState<string>("");
 
+  const handleSelectDrone = (mac: string) => {
+    setSelectedMac(mac);
+    if (mac) {
+      socket.emit("mocap-select-drone", { mac });
+    }
+  };
+
   useEffect(() => {
     const onFleet = (data: { drones?: FleetEntry[]; selected_mac?: string | null }) => {
       const drones = Array.isArray(data?.drones)
@@ -128,10 +135,16 @@ export default function MoCapView() {
         : [];
       setFleet(drones);
       if (data.selected_mac) {
+        // Backend owns the selection — mirror it.
         setSelectedMac(normaliseMac(data.selected_mac));
       } else if (!selectedMac && drones.length > 0) {
-        const firstActive = drones.find((d) => d.active) ?? drones[0];
-        setSelectedMac(firstActive.mac);
+        // No backend selection yet: pick the first ACTIVE drone and tell the
+        // backend, so the radio is actually retargeted — a display-only pick
+        // would let commands go to whatever drone the sender last targeted.
+        const firstActive = drones.find((d) => d.active);
+        if (firstActive) {
+          handleSelectDrone(firstActive.mac);
+        }
       }
     };
     socket.on("fleet", onFleet);
@@ -139,13 +152,6 @@ export default function MoCapView() {
       socket.off("fleet", onFleet);
     };
   }, [selectedMac]);
-
-  const handleSelectDrone = (mac: string) => {
-    setSelectedMac(mac);
-    if (mac) {
-      socket.emit("mocap-select-drone", { mac });
-    }
-  };
 
   useEffect(() => {
     socket.on("camera-pose", (data) => {

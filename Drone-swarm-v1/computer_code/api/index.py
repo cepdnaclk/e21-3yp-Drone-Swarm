@@ -341,11 +341,31 @@ def _emitter_loop():
 # Console command dispatch
 # =========================
 
+_radio_lock = threading.Lock()
+
+
+def _broadcast_fleet():
+    with _fleet_lock:
+        socketio.emit("fleet", {"drones": list(_fleet),
+                                "selected_mac": _selected_drone_mac})
+
+
 def _resolve_target(target):
-    """Resolve a console target ("all" or a fleet drone id/mac) to a fleet
-    entry, or None for the whole swarm. Raises ValueError on bad targets."""
+    """Resolve a console target to a fleet entry. "all" resolves to the
+    currently selected drone (there is exactly one radio link and one flight
+    controller, so a true fan-out is impossible). Raises ValueError on bad
+    or inactive targets."""
     if not target or target == "all":
-        return None
+        with _fleet_lock:
+            sel = _selected_drone_mac
+            for d in _fleet:
+                if sel and d["mac"] == sel and d["active"]:
+                    return dict(d)
+            # No valid selection yet: fall back to the first active drone.
+            for d in _fleet:
+                if d["active"]:
+                    return dict(d)
+        raise ValueError("no active drone in the fleet")
     with _fleet_lock:
         for d in _fleet:
             if d["id"] == target or d["mac"] == _normalise_mac(str(target)):
@@ -355,12 +375,19 @@ def _resolve_target(target):
     raise ValueError(f"unknown target '{target}'")
 
 
-def _retarget_radio(mac: str):
-    """Point the sender ESP32 at `mac` if it isn't already."""
+def _retarget_radio(mac: str, force: bool = False):
+    """Point the sender ESP32 at `mac`. Broadcasts the new selection to all
+    UI clients so MoCap/Console/Drones views stay in sync. `force` re-sends
+    the M-line even when we think the sender already targets `mac` (used at
+    boot to re-sync a sender that kept running across a backend restart)."""
     global _selected_drone_mac
-    if _selected_drone_mac != mac:
-        _selected_drone_mac = mac
-        _serial_write(f"M,{mac}\n".encode("ascii"))
+    with _radio_lock:
+        changed = _selected_drone_mac != mac
+        if changed or force:
+            _selected_drone_mac = mac
+            _serial_write(f"M,{mac}\n".encode("ascii"))
+    if changed:
+        _broadcast_fleet()
 
 
 def _current_position():
@@ -468,9 +495,8 @@ def on_console_command(data):
 
     try:
         entry = _resolve_target(target)
-        if entry is not None:
-            _retarget_radio(entry["mac"])
-        text = _console_dispatch(command, args, entry)
+        _retarget_radio(entry["mac"])
+        text = f"[{entry['name']}] {_console_dispatch(command, args, entry)}"
         socketio.emit("console-ack", {"target": target, "text": text})
         print(f"[console] {target}: {command} {' '.join(args)} -> {text}")
     except ValueError as e:
@@ -795,30 +821,38 @@ def on_fleet_update(data):
     with _fleet_lock:
         _fleet = cleaned
         _save_fleet(_fleet)
-        socketio.emit("fleet", {"drones": list(_fleet),
-                                "selected_mac": _selected_drone_mac})
+        # If the selected drone was removed or deactivated by this edit,
+        # fall back to the first active drone so the radio never keeps
+        # pointing at a drone the UI says is gone/standby.
+        sel = _selected_drone_mac
+        still_valid = any(d["mac"] == sel and d["active"] for d in cleaned)
+        fallback = next((d["mac"] for d in cleaned if d["active"]), None)
+    if not still_valid and fallback is not None:
+        _retarget_radio(fallback)
+    _broadcast_fleet()
 
 
 @socketio.on("mocap-select-drone")
 def on_mocap_select_drone(data):
     """Switch the MoCap target. Forwards the MAC to the sender ESP32 as
     'M,<mac>\\n' so it re-aims its ESP-NOW peer."""
-    global _selected_drone_mac
     if not isinstance(data, dict):
         return
     mac = _normalise_mac(str(data.get("mac", "")))
     if not _MAC_RE.match(mac):
         return
     with _fleet_lock:
-        known = any(d["mac"] == mac for d in _fleet)
-    if not known:
+        entry = next((d for d in _fleet if d["mac"] == mac), None)
+    if entry is None:
         print(f"[mocap] refusing to select unknown MAC {mac}")
         return
-    _selected_drone_mac = mac
-    _serial_write(f"M,{mac}\n".encode("ascii"))
-    socketio.emit("fleet", {"drones": list(_fleet),
-                            "selected_mac": _selected_drone_mac})
-    print(f"[mocap] selected drone {mac}")
+    if not entry["active"]:
+        print(f"[mocap] refusing to select standby drone {entry['name']} ({mac})")
+        _broadcast_fleet()  # snap the requesting client back to the real selection
+        return
+    _retarget_radio(mac)
+    _broadcast_fleet()
+    print(f"[mocap] selected drone {entry['name']} ({mac})")
 
 
 @socketio.on("arm-drone")
@@ -935,6 +969,14 @@ def on_triangulate_points(_data):
 
 def _start_background_threads():
     _open_serial()
+    # Sync the sender's radio target to our fleet at boot. force=True because
+    # the sender may have kept running across a backend restart with a stale
+    # target — we re-send the M-line even though we have no selection yet.
+    with _fleet_lock:
+        boot_mac = next((d["mac"] for d in _fleet if d["active"]), None)
+    if boot_mac is not None:
+        _retarget_radio(boot_mac, force=True)
+        print(f"[boot] radio target -> {boot_mac}")
     cameras.start()
     threading.Thread(target=_heading_reader_loop, daemon=True, name="HeadingReader").start()
     threading.Thread(target=_control_loop, daemon=True, name="Control").start()

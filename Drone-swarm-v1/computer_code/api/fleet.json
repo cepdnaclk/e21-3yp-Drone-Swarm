@@ -1,8 +1,20 @@
 [
   {
-    "id": "dkywbc8",
-    "name": "alpha",
-    "mac": "00:00:00:00:00:00",
+    "id": "drone1",
+    "name": "Drone 1",
+    "mac": "10:00:3B:B1:5B:8C",
     "active": true
+  },
+  {
+    "id": "drone2",
+    "name": "Drone 2",
+    "mac": "11:00:3B:B1:5B:8C",
+    "active": false
+  },
+  {
+    "id": "drone3",
+    "name": "Drone 3",
+    "mac": "11:00:3B:B1:5B:8D",
+    "active": false
   }
 ]

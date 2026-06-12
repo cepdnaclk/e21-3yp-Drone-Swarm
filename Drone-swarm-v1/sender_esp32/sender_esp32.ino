@@ -68,7 +68,7 @@ typedef struct __attribute__((packed)) {
   uint32_t seq;
 } StatePacket;
 
-// MUST match the struct in receiver_esp32.ino exactly.
+// MUST match the struct in receiver_esp32/receiver_drone*/receiver_drone*.ino exactly.
 typedef struct __attribute__((packed)) {
   int16_t  pitch_centirad;   // 1/10000 rad (CRSF native units)
   int16_t  roll_centirad;
@@ -283,20 +283,25 @@ void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "ESP-NOW OK" : "ESP-NOW FAIL");
 }
 
-// Drone -> PC: decode TelemetryPacket. Prints two USB-serial lines:
-//   "H<float>\n"                          for the heading reader (single-drone path)
-//   "B<src_mac>,<mv>,<pct>\n"             battery telemetry tagged with the drone MAC
+// Drone -> PC: decode TelemetryPacket. Prints up to two USB-serial lines:
+//   "H<float>\n"               heading -- ONLY from the currently-targeted drone,
+//                              otherwise a second powered-on drone would
+//                              interleave its yaw into the PC's heading filter
+//   "B<src_mac>,<mv>,<pct>\n"  battery telemetry, from EVERY drone (tagged by MAC)
 // The Python backend reads both in its serial reader thread.
 void OnDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   if (len != sizeof(TelemetryPacket)) return;
   TelemetryPacket t;
   memcpy(&t, data, sizeof(t));
 
-  float yaw_rad = (float)t.yaw_centirad / 10000.0f;
-  Serial.print("H");
-  Serial.println(yaw_rad, 4);
-
   const uint8_t *m = info->src_addr;
+
+  if (memcmp(m, receiverAddress, 6) == 0) {
+    float yaw_rad = (float)t.yaw_centirad / 10000.0f;
+    Serial.print("H");
+    Serial.println(yaw_rad, 4);
+  }
+
   Serial.printf("B%02X:%02X:%02X:%02X:%02X:%02X,%u,%u\n",
                 m[0], m[1], m[2], m[3], m[4], m[5],
                 (unsigned)t.battery_mv,

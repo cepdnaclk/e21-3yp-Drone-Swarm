@@ -1,4 +1,4 @@
-// Mocap drone-side ESP32-C3 -- DRONE 3 (STA MAC 11:00:3B:B1:5B:8D).
+// Mocap drone-side ESP32-C3 -- DRONE 3 (STA MAC 12:00:3B:B1:5B:8D).
 // ESP-NOW <-> CRSF bridge + CRSF telemetry relay back to the laptop +
 // nested PID stack (position -> velocity -> stick PWM) running on-board.
 //
@@ -333,8 +333,15 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setChannel(ESPNOW_CHANNEL);
 
-  uint8_t newMAC[] = { 0x11, 0x00, 0x3B, 0xB1, 0x5B, 0x8D };
-  esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  uint8_t newMAC[] = { 0x12, 0x00, 0x3B, 0xB1, 0x5B, 0x8D };
+  // NOTE: must be a UNICAST MAC -- bit 0 of the first byte must be 0 (even
+  // first octet), or esp_wifi_set_mac rejects it and the drone keeps its
+  // factory MAC, silently never receiving any ESP-NOW packets aimed at it.
+  esp_err_t macErr = esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  if (macErr != ESP_OK) {
+    Serial.printf("FATAL: esp_wifi_set_mac failed (err %d) -- MAC must be unicast!\n",
+                  (int)macErr);
+  }
 
   uint8_t staMac[6];
   esp_wifi_get_mac(WIFI_IF_STA, staMac);

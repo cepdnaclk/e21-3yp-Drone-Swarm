@@ -8,13 +8,13 @@
   {
     "id": "drone2",
     "name": "Drone 2",
-    "mac": "11:00:3B:B1:5B:8C",
+    "mac": "12:00:3B:B1:5B:8C",
     "active": false
   },
   {
     "id": "drone3",
     "name": "Drone 3",
-    "mac": "11:00:3B:B1:5B:8D",
+    "mac": "12:00:3B:B1:5B:8D",
     "active": false
   }
 ]

@@ -334,7 +334,14 @@ void setup() {
   WiFi.setChannel(ESPNOW_CHANNEL);
 
   uint8_t newMAC[] = { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
-  esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  // NOTE: must be a UNICAST MAC -- bit 0 of the first byte must be 0 (even
+  // first octet), or esp_wifi_set_mac rejects it and the drone keeps its
+  // factory MAC, silently never receiving any ESP-NOW packets aimed at it.
+  esp_err_t macErr = esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  if (macErr != ESP_OK) {
+    Serial.printf("FATAL: esp_wifi_set_mac failed (err %d) -- MAC must be unicast!\n",
+                  (int)macErr);
+  }
 
   uint8_t staMac[6];
   esp_wifi_get_mac(WIFI_IF_STA, staMac);

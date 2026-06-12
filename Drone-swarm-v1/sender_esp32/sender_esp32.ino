@@ -7,10 +7,11 @@
 //     "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed\n"  -> msg_type 0
 //     "P,<17 floats>\n"                                  -> msg_type 2 (PID + ground effect)
 //     "T,trim_t,trim_r,trim_p,trim_y\n"                  -> msg_type 3
-//     "M,AA:BB:CC:DD:EE:FF\n"                            -> retarget ESP-NOW peer (no packet sent)
+//     "M,AA:BB:CC:DD:EE:FF\n"                            -> retarget ESP-NOW peer by MAC
+//     "R,1\n" / "R,2\n" / "R,3\n"                         -> select a configured receiver
 //
 //   State packets are streamed at the 50 Hz periodic timer. P/T packets are
-//   sent immediately on parse (rare events). M lines change which drone the
+//   sent immediately on parse (rare events). M/R lines change which drone the
 //   MoCap stream is aimed at -- used when the UI selects a different drone.
 //
 // Direction drone -> PC:
@@ -29,7 +30,21 @@
 #include <string.h>
 
 // ================= USER SETTINGS =================
+struct ReceiverTarget {
+  const char *name;
+  uint8_t mac[6];
+};
+
+ReceiverTarget receiverTargets[] = {
+  { "receiver_1", { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C } },
+  { "receiver_2", { 0x11, 0x00, 0x3B, 0xB1, 0x5B, 0x8C } },
+  { "receiver_3", { 0x11, 0x00, 0x3B, 0xB1, 0x5B, 0x8D } },
+};
+
+#define RECEIVER_COUNT (sizeof(receiverTargets) / sizeof(receiverTargets[0]))
+
 uint8_t receiverAddress[] = { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
+int selectedReceiver = 0;
 #define ESPNOW_CHANNEL 1
 #define SEND_PERIOD_MS 20   // 50 Hz state stream
 #define DEBUG_CMD_PRINT 0
@@ -68,6 +83,41 @@ StatePacket latestState = {};
 uint32_t lastSend = 0;
 uint32_t seqCounter = 0;
 String inputLine = "";
+
+static void printMac(const uint8_t *mac) {
+  Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static bool addCurrentPeer() {
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);
+  peerInfo.channel = ESPNOW_CHANNEL;
+  peerInfo.encrypt = false;
+  return esp_now_add_peer(&peerInfo) == ESP_OK;
+}
+
+static bool setTargetMac(const uint8_t *mac, const char *label) {
+  if (memcmp(mac, receiverAddress, 6) == 0) return true;
+
+  esp_now_del_peer(receiverAddress);
+  memcpy(receiverAddress, mac, 6);
+
+  if (!addCurrentPeer()) {
+    Serial.println("Failed to re-add ESP-NOW peer");
+    return false;
+  }
+
+  Serial.print("[sender] target");
+  if (label && label[0]) {
+    Serial.print(" ");
+    Serial.print(label);
+  }
+  Serial.print(" -> ");
+  printMac(receiverAddress);
+  Serial.println();
+  return true;
+}
 
 // Parse N comma-separated floats from `line` starting at offset `start`.
 // Returns true on success, false if any field is missing or non-numeric.
@@ -189,23 +239,31 @@ static void parseMacLine(const String &line) {
     }
   }
 
-  if (memcmp(mac, receiverAddress, 6) == 0) return;  // nothing to do
+  selectedReceiver = -1;
+  for (int i = 0; i < (int)RECEIVER_COUNT; i++) {
+    if (memcmp(mac, receiverTargets[i].mac, 6) == 0) {
+      selectedReceiver = i;
+      break;
+    }
+  }
 
-  // Remove the old peer (ignore failure -- might not have been added yet),
-  // swap the target MAC in, and add the new peer.
-  esp_now_del_peer(receiverAddress);
-  memcpy(receiverAddress, mac, 6);
+  setTargetMac(mac, selectedReceiver >= 0 ? receiverTargets[selectedReceiver].name : "custom");
+}
 
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, receiverAddress, 6);
-  peerInfo.channel = ESPNOW_CHANNEL;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Failed to re-add ESP-NOW peer");
+// "R,1" / "R,2" / "R,3" -> select one of the configured receiver MACs above.
+static void parseReceiverSelectLine(const String &line) {
+  String part = line.substring(2);
+  part.trim();
+  int idx = part.toInt();
+  if (idx < 1 || idx > (int)RECEIVER_COUNT) {
+    Serial.printf("[sender] invalid receiver %d; use R,1..%u\n",
+                  idx, (unsigned)RECEIVER_COUNT);
     return;
   }
-  Serial.printf("[sender] target -> %02X:%02X:%02X:%02X:%02X:%02X\n",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  selectedReceiver = idx - 1;
+  setTargetMac(receiverTargets[selectedReceiver].mac,
+               receiverTargets[selectedReceiver].name);
 }
 
 static void parseSerialLine(const String &line) {
@@ -215,6 +273,7 @@ static void parseSerialLine(const String &line) {
     case 'P': parsePidLine(line);   break;
     case 'T': parseTrimLine(line);  break;
     case 'M': parseMacLine(line);   break;
+    case 'R': parseReceiverSelectLine(line); break;
     default:                        break;
   }
 }
@@ -266,11 +325,7 @@ void setup() {
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);
 
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, receiverAddress, 6);
-  peerInfo.channel = ESPNOW_CHANNEL;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+  if (!addCurrentPeer()) {
     Serial.println("Failed to add ESP-NOW peer");
     return;
   }
@@ -281,6 +336,7 @@ void setup() {
 
   Serial.println("Transmitter ready: Python Serial -> ESP-NOW; ESP-NOW -> H<yaw>");
   Serial.println("Format: S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed");
+  Serial.println("Select receiver: R,1 / R,2 / R,3 or M,AA:BB:CC:DD:EE:FF");
 }
 
 void loop() {

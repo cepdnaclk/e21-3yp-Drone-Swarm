@@ -27,8 +27,8 @@
 #include <math.h>
 
 // ================= USER SETTINGS =================
-#define CRSF_RX_PIN 20
-#define CRSF_TX_PIN 21
+#define CRSF_RX_PIN 21
+#define CRSF_TX_PIN 20
 #define ESPNOW_CHANNEL 1
 #define FAILSAFE_MS 500
 #define TELEMETRY_PERIOD_MS 20   // 50 Hz drone -> laptop attitude updates

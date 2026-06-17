@@ -43,7 +43,7 @@ from LowPassFilter import LowPassFilter
 # Config
 # =========================
 
-SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM6")
+SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM10")
 SERIAL_BAUD = int(os.environ.get("SENDER_SERIAL_BAUD", "115200"))
 
 CONTROL_HZ = 60.0

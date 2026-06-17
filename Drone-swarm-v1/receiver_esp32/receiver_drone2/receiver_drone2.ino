@@ -32,7 +32,7 @@
 #define ESPNOW_CHANNEL 1
 #define FAILSAFE_MS 500
 #define TELEMETRY_PERIOD_MS 20   // 50 Hz drone -> laptop attitude updates
-#define DEBUG_RX_PRINT 0
+#define DEBUG_RX_PRINT 1   // TEMP: set back to 0 after diagnosing selection
 #define ENABLE_YAW_HOLD 0
 #define ENABLE_GROUND_EFFECT 0   // see note in loop() near the multiplier
 
@@ -288,9 +288,27 @@ void parseCRSFByte(uint8_t b) {
 // ---------------- ESP-NOW ----------------
 
 void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
+#if DEBUG_RX_PRINT
+  static uint32_t lastDbg = 0;
+  bool dbg = (millis() - lastDbg > 500);
+  if (dbg) {
+    lastDbg = millis();
+    Serial.printf("[rx] len=%d expected=%u\n", len, (unsigned)sizeof(StatePacket));
+  }
+#endif
   if (len != sizeof(StatePacket)) return;
   StatePacket pkt;
   memcpy(&pkt, incomingData, sizeof(pkt));
+
+#if DEBUG_RX_PRINT
+  if (dbg) {
+    bool m = (memcmp(pkt.target, myMac, 6) == 0);
+    Serial.printf("[rx] tgt=%02X:%02X:%02X:%02X:%02X:%02X me=%02X:%02X:%02X:%02X:%02X:%02X type=%u %s\n",
+                  pkt.target[0], pkt.target[1], pkt.target[2], pkt.target[3], pkt.target[4], pkt.target[5],
+                  myMac[0], myMac[1], myMac[2], myMac[3], myMac[4], myMac[5],
+                  pkt.msg_type, m ? "MATCH" : "ignore");
+  }
+#endif
 
   // Broadcast addressing: every drone hears every packet. Only the selected
   // drone (target == our MAC) acts on it. A non-selected drone forces itself

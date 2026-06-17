@@ -57,6 +57,10 @@
 // sender_esp32.ino's setup() ("[sender] STA MAC: ...").
 uint8_t senderAddress[] = { 0x70, 0x4B, 0xCA, 0x48, 0xC1, 0x24 };
 
+// This board's own STA MAC, read back in setup(). State packets are broadcast
+// to every drone; we only act on a packet whose `target` equals myMac.
+uint8_t myMac[6] = {0};
+
 HardwareSerial CRSFSerial(1);
 
 // MUST match sender_esp32.ino exactly.
@@ -69,6 +73,7 @@ typedef struct __attribute__((packed)) {
   int16_t  trim_t, trim_r, trim_p, trim_y;
   uint8_t  armed;
   uint8_t  msg_type;             // 0=state, 2=pid_gains, 3=trim
+  uint8_t  target[6];            // selected drone's STA MAC; only that drone acts on this packet
   uint32_t seq;
 } StatePacket;
 
@@ -286,6 +291,17 @@ void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int 
   if (len != sizeof(StatePacket)) return;
   StatePacket pkt;
   memcpy(&pkt, incomingData, sizeof(pkt));
+
+  // Broadcast addressing: every drone hears every packet. Only the selected
+  // drone (target == our MAC) acts on it. A non-selected drone forces itself
+  // disarmed and does NOT refresh lastRecvTime -- because broadcast keeps the
+  // packets flowing, the comm-loss failsafe alone would never catch a
+  // deselection, so this is the safety gate that parks a deselected drone.
+  if (memcmp(pkt.target, myMac, 6) != 0) {
+    armed  = false;
+    flying = false;
+    return;
+  }
   lastRecvTime = millis();
 
   if (pkt.msg_type == 0) {
@@ -333,14 +349,19 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setChannel(ESPNOW_CHANNEL);
 
-  uint8_t newMAC[] = { 0x11, 0x00, 0x3B, 0xB1, 0x5B, 0x8D };
-  esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  // First octet MUST be even -- the low bit of octet 0 is the multicast (I/G)
+  // bit and esp_wifi_set_mac() rejects a STA MAC with it set. MUST match this
+  // drone's entry in sender_esp32.ino's receiverTargets[].
+  uint8_t newMAC[] = { 0x14, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
+  esp_err_t macErr = esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  if (macErr != ESP_OK) {
+    Serial.printf("[receiver] esp_wifi_set_mac failed (0x%x) -- using factory MAC\n", macErr);
+  }
 
-  uint8_t staMac[6];
-  esp_wifi_get_mac(WIFI_IF_STA, staMac);
+  esp_wifi_get_mac(WIFI_IF_STA, myMac);
   Serial.printf("[receiver] STA MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                staMac[0], staMac[1], staMac[2],
-                staMac[3], staMac[4], staMac[5]);
+                myMac[0], myMac[1], myMac[2],
+                myMac[3], myMac[4], myMac[5]);
 
   setSafeChannels();
   CRSFSerial.begin(420000, SERIAL_8N1, CRSF_RX_PIN, CRSF_TX_PIN);

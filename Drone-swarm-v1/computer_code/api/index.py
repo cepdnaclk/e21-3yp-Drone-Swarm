@@ -352,9 +352,10 @@ def _broadcast_fleet():
 
 def _resolve_target(target):
     """Resolve a console target to a fleet entry. "all" resolves to the
-    currently selected drone (there is exactly one radio link and one flight
-    controller, so a true fan-out is impossible). Raises ValueError on bad
-    or inactive targets."""
+    currently selected drone: the sender ESP-NOW *broadcasts* every state
+    packet to the whole fleet, but each packet carries a target MAC and only
+    the matching drone acts on it -- so commands still address one drone at a
+    time. Raises ValueError on bad or inactive targets."""
     if not target or target == "all":
         with _fleet_lock:
             sel = _selected_drone_mac

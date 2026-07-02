@@ -33,7 +33,7 @@ import numpy as np
 # DEFAULTS (override via constructor args / env)
 # =========================
 
-DEFAULT_CAMERA_INDICES = [1, 2, 4, 3]
+DEFAULT_CAMERA_INDICES = [1, 4, 3, 2]
 DEFAULT_CAMERA_NAMES = ["cam1", "cam2", "cam3", "cam4"]
 DEFAULT_CAM_WIDTH = 640
 DEFAULT_CAM_HEIGHT = 480

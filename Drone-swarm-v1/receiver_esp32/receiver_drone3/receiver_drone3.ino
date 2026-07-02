@@ -1,4 +1,4 @@
-// Mocap drone-side ESP32-C3.
+// Mocap drone-side ESP32-C3 -- DRONE 3 (STA MAC 11:00:3B:B1:5B:8D).
 // ESP-NOW <-> CRSF bridge + CRSF telemetry relay back to the laptop +
 // nested PID stack (position -> velocity -> stick PWM) running on-board.
 //
@@ -8,14 +8,17 @@
 //                            over CRSF UART to Betaflight FC at ~250 Hz.
 //                            500 ms failsafe forces safe sticks if comm dies.
 //
-// Outbound (here -> sender):  CRSF telemetry ATTITUDE frames (type 0x1E)
-//                            received from FC TX line are decoded and
-//                            forwarded as TelemetryPacket via ESP-NOW @ 50 Hz.
-//                            The laptop ESP32 then prints "H<yaw>" to USB.
+// Outbound (here -> sender):  CRSF telemetry ATTITUDE frames (type 0x1E) and
+//                            BATTERY_SENSOR frames (type 0x08) received from
+//                            the FC TX line are decoded and forwarded as one
+//                            TelemetryPacket via ESP-NOW @ 50 Hz. The laptop
+//                            ESP32 then prints "H<yaw>" + "B<mac>,..." to USB.
 //
 // The CRSF UART (RX pin 20 / TX pin 21) is already bidirectional in the
 // wiring -- no new wires needed. Enable CRSF telemetry on this UART in
-// Betaflight's Ports tab.
+// Betaflight's Ports tab. Battery readings come straight from the FC's own
+// voltage sensor (the same one shown in the Betaflight OSD); make sure the
+// "Battery Meter" voltage source is configured in Betaflight's Power tab.
 
 #include <esp_now.h>
 #include <WiFi.h>
@@ -24,8 +27,8 @@
 #include <math.h>
 
 // ================= USER SETTINGS =================
-#define CRSF_RX_PIN 20
-#define CRSF_TX_PIN 21
+#define CRSF_RX_PIN 21
+#define CRSF_TX_PIN 20
 #define ESPNOW_CHANNEL 1
 #define FAILSAFE_MS 500
 #define TELEMETRY_PERIOD_MS 20   // 50 Hz drone -> laptop attitude updates
@@ -37,11 +40,26 @@
 #define ROTOR_RADIUS 0.0225
 #define Z_GAIN 1.5
 #define ARM_DELAY_MS 100
+
+// ---- Battery ----
+// Battery voltage comes from the FC over CRSF telemetry (BATTERY_SENSOR,
+// frame type 0x08) -- no extra wiring, the FC already measures the pack.
+// The frame carries a "remaining %" field, but Betaflight only fills it in
+// when a pack capacity (mAh) is configured; when it reads 0 we fall back to
+// a linear voltage->percent map between BATTERY_MIN_MV and BATTERY_MAX_MV.
+// Defaults assume a 1S LiPo (3.30 V empty, 4.20 V full); multiply by the
+// cell count for bigger packs (e.g. 2S: 6600 / 8400).
+#define BATTERY_MIN_MV      3300
+#define BATTERY_MAX_MV      4200
 // =================================================
 
 // Sender ESP32's STA MAC. Replace with the MAC printed at boot by
 // sender_esp32.ino's setup() ("[sender] STA MAC: ...").
 uint8_t senderAddress[] = { 0x70, 0x4B, 0xCA, 0x48, 0xC1, 0x24 };
+
+// This board's own STA MAC, read back in setup(). State packets are broadcast
+// to every drone; we only act on a packet whose `target` equals myMac.
+uint8_t myMac[6] = {0};
 
 HardwareSerial CRSFSerial(1);
 
@@ -55,6 +73,7 @@ typedef struct __attribute__((packed)) {
   int16_t  trim_t, trim_r, trim_p, trim_y;
   uint8_t  armed;
   uint8_t  msg_type;             // 0=state, 2=pid_gains, 3=trim
+  uint8_t  target[6];            // selected drone's STA MAC; only that drone acts on this packet
   uint32_t seq;
 } StatePacket;
 
@@ -62,10 +81,13 @@ typedef struct __attribute__((packed)) {
   int16_t  pitch_centirad;
   int16_t  roll_centirad;
   int16_t  yaw_centirad;
+  uint16_t battery_mv;       // pack voltage in millivolts (from FC CRSF battery frame)
+  uint8_t  battery_pct;      // 0..100; FC remaining-% if set, else voltage-mapped
+  uint8_t  _pad;             // keeps the struct 4-byte aligned
   uint32_t seq;
 } TelemetryPacket;
 
-TelemetryPacket telem = {0, 0, 0, 0};
+TelemetryPacket telem = {0, 0, 0, 0, 0, 0, 0};
 uint32_t lastRecvTime = 0;
 uint32_t lastTelemSend = 0;
 uint32_t lastCRSFSend = 0;
@@ -106,6 +128,18 @@ PID yawPosPID(&yawPos, &yawPosOutput, &yawPosSetpoint, yawPosKp, yawPosKi, yawPo
 PID xVelPID(&xVel, &xVelOutput, &xVelSetpoint, xyVelKp, xyVelKi, xyVelKd, DIRECT);
 PID yVelPID(&yVel, &yVelOutput, &yVelSetpoint, xyVelKp, xyVelKi, xyVelKd, DIRECT);
 PID zVelPID(&zVel, &zVelOutput, &zVelSetpoint, zVelKp,  zVelKi,  zVelKd,  DIRECT);
+
+// Linear voltage -> percent map between BATTERY_MIN_MV and BATTERY_MAX_MV.
+// Used when the FC's BATTERY_SENSOR frame doesn't carry a remaining-% value
+// (Betaflight sends 0 there unless a pack capacity is configured).
+uint8_t mvToPct(uint32_t mv) {
+  int32_t span = (int32_t)BATTERY_MAX_MV - (int32_t)BATTERY_MIN_MV;
+  if (span <= 0) return 0;
+  int32_t pct = ((int32_t)mv - (int32_t)BATTERY_MIN_MV) * 100 / span;
+  if (pct < 0)   pct = 0;
+  if (pct > 100) pct = 100;
+  return (uint8_t)pct;
+}
 
 // Forces an integrator reset by walking the output limits across the current value.
 // This is the same trick the original drone-side firmware used at disarm.
@@ -181,7 +215,8 @@ void sendCRSF() {
 // Address may be 0xC8 (FC), 0xEA (handset), 0xC8 (broadcast) depending on
 // origin -- accept any common value to stay forgiving.
 
-#define CRSF_FRAMETYPE_ATTITUDE 0x1E
+#define CRSF_FRAMETYPE_BATTERY_SENSOR 0x08
+#define CRSF_FRAMETYPE_ATTITUDE       0x1E
 
 enum CrsfParseState { CRSF_WAIT_SYNC, CRSF_READ_LEN, CRSF_READ_DATA };
 static CrsfParseState crsfState = CRSF_WAIT_SYNC;
@@ -228,6 +263,21 @@ void parseCRSFByte(uint8_t b) {
           telem.roll_centirad  = roll_cr;
           telem.yaw_centirad   = yaw_cr;
           yawPos = (double)yaw_cr / 10000.0;
+        } else if (recvCrc == calcCrc &&
+                   type == CRSF_FRAMETYPE_BATTERY_SENSOR && crsfLen == 10) {
+          // payload at crsfBuf[3..10]:
+          //   [3][4] voltage  (uint16 BE, 0.1 V units)
+          //   [5][6] current  (uint16 BE, 0.1 A units)
+          //   [7][8][9] fuel  (uint24 BE, mAh drawn)
+          //   [10]   remaining percent (uint8; 0 unless capacity set in BF)
+          uint16_t volt_dV = ((uint16_t)crsfBuf[3] << 8) | crsfBuf[4];
+          uint8_t  fc_pct  = crsfBuf[10];
+          uint32_t mv = (uint32_t)volt_dV * 100;
+          if (mv > 65535) mv = 65535;
+          telem.battery_mv  = (uint16_t)mv;
+          telem.battery_pct = (fc_pct > 0 && fc_pct <= 100)
+                                ? fc_pct
+                                : mvToPct(mv);
         }
         crsfState = CRSF_WAIT_SYNC;
       }
@@ -241,6 +291,17 @@ void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int 
   if (len != sizeof(StatePacket)) return;
   StatePacket pkt;
   memcpy(&pkt, incomingData, sizeof(pkt));
+
+  // Broadcast addressing: every drone hears every packet. Only the selected
+  // drone (target == our MAC) acts on it. A non-selected drone forces itself
+  // disarmed and does NOT refresh lastRecvTime -- because broadcast keeps the
+  // packets flowing, the comm-loss failsafe alone would never catch a
+  // deselection, so this is the safety gate that parks a deselected drone.
+  if (memcmp(pkt.target, myMac, 6) != 0) {
+    armed  = false;
+    flying = false;
+    return;
+  }
   lastRecvTime = millis();
 
   if (pkt.msg_type == 0) {
@@ -285,20 +346,25 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  setSafeChannels();
-  CRSFSerial.begin(420000, SERIAL_8N1, CRSF_RX_PIN, CRSF_TX_PIN);
-
   WiFi.mode(WIFI_STA);
   WiFi.setChannel(ESPNOW_CHANNEL);
 
-  uint8_t newMAC[] = { 0x11, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
-  esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  // First octet MUST be even -- the low bit of octet 0 is the multicast (I/G)
+  // bit and esp_wifi_set_mac() rejects a STA MAC with it set. MUST match this
+  // drone's entry in sender_esp32.ino's receiverTargets[].
+  uint8_t newMAC[] = { 0x14, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
+  esp_err_t macErr = esp_wifi_set_mac(WIFI_IF_STA, newMAC);
+  if (macErr != ESP_OK) {
+    Serial.printf("[receiver] esp_wifi_set_mac failed (0x%x) -- using factory MAC\n", macErr);
+  }
 
-  uint8_t staMac[6];
-  esp_wifi_get_mac(WIFI_IF_STA, staMac);
+  esp_wifi_get_mac(WIFI_IF_STA, myMac);
   Serial.printf("[receiver] STA MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                staMac[0], staMac[1], staMac[2],
-                staMac[3], staMac[4], staMac[5]);
+                myMac[0], myMac[1], myMac[2],
+                myMac[3], myMac[4], myMac[5]);
+
+  setSafeChannels();
+  CRSFSerial.begin(420000, SERIAL_8N1, CRSF_RX_PIN, CRSF_TX_PIN);
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW init failed");
@@ -427,7 +493,9 @@ void loop() {
     sendCRSF();
   }
 
-  // 5) Periodically forward latest attitude to laptop at ~50 Hz.
+  // 5) Periodically forward latest attitude + battery to laptop at ~50 Hz.
+  //    Battery fields are refreshed in parseCRSFByte() whenever the FC sends
+  //    a BATTERY_SENSOR telemetry frame (typically a few Hz).
   if (millis() - lastTelemSend >= TELEMETRY_PERIOD_MS) {
     lastTelemSend = millis();
     telem.seq++;

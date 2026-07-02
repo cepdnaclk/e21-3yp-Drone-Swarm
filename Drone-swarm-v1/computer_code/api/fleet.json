@@ -1,0 +1,20 @@
+[
+  {
+    "id": "qc3fhp0",
+    "name": "alpha",
+    "mac": "10:00:3B:B1:5B:8C",
+    "active": true
+  },
+  {
+    "id": "pdz7esf",
+    "name": "beta",
+    "mac": "14:00:3B:B1:5B:8C",
+    "active": true
+  },
+  {
+    "id": "bxn7qrk",
+    "name": "gamma",
+    "mac": "12:00:3B:B1:5B:8D",
+    "active": true
+  }
+]

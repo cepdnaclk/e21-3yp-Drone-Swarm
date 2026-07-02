@@ -1,20 +1,28 @@
 // Mocap PC <-> drone bridge (laptop-side ESP32, USB serial <-> ESP-NOW).
 //
-// Direction PC -> drone:
-//   Reads three line-based formats from USB serial @ 115200 and forwards as
-//   a binary StatePacket (msg_type-tagged) via ESP-NOW @ 50 Hz to the drone:
+// Direction PC -> drones:
+//   Reads four line-based formats from USB serial @ 115200 and forwards as
+//   a binary StatePacket (msg_type-tagged) ESP-NOW *broadcast* @ 50 Hz to ALL
+//   drones. Each packet carries a `target` MAC; only the drone whose STA MAC
+//   matches acts on it, every other drone holds itself disarmed:
 //
 //     "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed\n"  -> msg_type 0
 //     "P,<17 floats>\n"                                  -> msg_type 2 (PID + ground effect)
 //     "T,trim_t,trim_r,trim_p,trim_y\n"                  -> msg_type 3
+//     "M,AA:BB:CC:DD:EE:FF\n"                            -> retarget ESP-NOW peer by MAC
+//     "R,1\n" / "R,2\n" / "R,3\n"                         -> select a configured receiver
 //
 //   State packets are streamed at the 50 Hz periodic timer. P/T packets are
-//   sent immediately on parse (rare events).
+//   sent immediately on parse (rare events). M/R lines change which drone the
+//   `target` MAC selects -- used when the UI selects a different drone. All
+//   sends are broadcast; selection only changes the target stamp, not the wire.
 //
 // Direction drone -> PC:
-//   ESP-NOW receives a binary TelemetryPacket (CRSF attitude relayed by the
-//   drone ESP32-C3), and prints "H<yaw_rad>\n" over USB serial so the Python
-//   backend can fuse heading.
+//   ESP-NOW receives a binary TelemetryPacket (CRSF attitude + pack battery
+//   relayed by the drone ESP32-C3). Prints two USB-serial lines per packet:
+//
+//     "H<yaw_rad>\n"                       -- for the heading reader (single-drone path)
+//     "B<src_mac>,<mv>,<pct>\n"            -- battery telemetry tagged with the drone's MAC
 //
 // Also: prints this board's STA MAC at boot so you can paste it into the
 // drone firmware's `senderAddress[]`.
@@ -25,7 +33,29 @@
 #include <string.h>
 
 // ================= USER SETTINGS =================
+struct ReceiverTarget {
+  const char *name;
+  uint8_t mac[6];
+};
+
+// First octet must be EVEN: the low bit of octet 0 is the multicast (I/G) bit,
+// and esp_wifi_set_mac() rejects any STA MAC with it set. 0x10/0x12/0x14 are
+// all even (valid unicast) and distinct. MUST match each receiver_droneN.ino.
+ReceiverTarget receiverTargets[] = {
+  { "receiver_1", { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C } },
+  { "receiver_2", { 0x12, 0x00, 0x3B, 0xB1, 0x5B, 0x8C } },
+  { "receiver_3", { 0x14, 0x00, 0x3B, 0xB1, 0x5B, 0x8C } },
+};
+
+#define RECEIVER_COUNT (sizeof(receiverTargets) / sizeof(receiverTargets[0]))
+
+// State packets are ESP-NOW *broadcast* to every drone. `receiverAddress` is
+// no longer the send destination -- it is the identity of the currently
+// SELECTED drone: it is copied into StatePacket.target (so only that drone
+// acts on the command) and used to filter inbound "H<yaw>" heading telemetry.
 uint8_t receiverAddress[] = { 0x10, 0x00, 0x3B, 0xB1, 0x5B, 0x8C };
+const uint8_t broadcastAddress[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+int selectedReceiver = 0;
 #define ESPNOW_CHANNEL 1
 #define SEND_PERIOD_MS 20   // 50 Hz state stream
 #define DEBUG_CMD_PRINT 0
@@ -46,14 +76,18 @@ typedef struct __attribute__((packed)) {
   int16_t  trim_t, trim_r, trim_p, trim_y;
   uint8_t  armed;                // 0 or 1
   uint8_t  msg_type;             // 0=state, 2=pid_gains, 3=trim
+  uint8_t  target[6];            // selected drone's STA MAC; only that drone acts on this packet
   uint32_t seq;
 } StatePacket;
 
-// MUST match the struct in drone_receiver_crsf_espnow.ino exactly.
+// MUST match the struct in receiver_esp32/receiver_drone*/receiver_drone*.ino exactly.
 typedef struct __attribute__((packed)) {
   int16_t  pitch_centirad;   // 1/10000 rad (CRSF native units)
   int16_t  roll_centirad;
   int16_t  yaw_centirad;
+  uint16_t battery_mv;       // pack voltage in millivolts (from FC CRSF battery frame)
+  uint8_t  battery_pct;      // 0..100; FC remaining-% if set, else voltage-mapped
+  uint8_t  _pad;
   uint32_t seq;
 } TelemetryPacket;
 
@@ -61,6 +95,40 @@ StatePacket latestState = {};
 uint32_t lastSend = 0;
 uint32_t seqCounter = 0;
 String inputLine = "";
+
+static void printMac(const uint8_t *mac) {
+  Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+// State is broadcast, so the only ESP-NOW peer we ever need is the broadcast
+// address. Drones do not need to be peers for us to RECEIVE their telemetry.
+static bool addBroadcastPeer() {
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = ESPNOW_CHANNEL;
+  peerInfo.encrypt = false;
+  return esp_now_add_peer(&peerInfo) == ESP_OK;
+}
+
+// Change which drone is SELECTED. No peer juggling -- we always broadcast;
+// this only updates the target MAC stamped into outgoing packets.
+static bool setTargetMac(const uint8_t *mac, const char *label) {
+  if (memcmp(mac, receiverAddress, 6) == 0) return true;
+
+  memcpy(receiverAddress, mac, 6);
+  memcpy(latestState.target, receiverAddress, 6);
+
+  Serial.print("[sender] target");
+  if (label && label[0]) {
+    Serial.print(" ");
+    Serial.print(label);
+  }
+  Serial.print(" -> ");
+  printMac(receiverAddress);
+  Serial.println();
+  return true;
+}
 
 // Parse N comma-separated floats from `line` starting at offset `start`.
 // Returns true on success, false if any field is missing or non-numeric.
@@ -131,8 +199,9 @@ static void parsePidLine(const String &line) {
   StatePacket pkt = latestState;
   memcpy(pkt.pid, gains, sizeof(gains));
   pkt.msg_type = 2;
+  memcpy(pkt.target, receiverAddress, 6);
   pkt.seq = ++seqCounter;
-  esp_now_send(receiverAddress, (uint8_t *)&pkt, sizeof(pkt));
+  esp_now_send(broadcastAddress, (uint8_t *)&pkt, sizeof(pkt));
 }
 
 // "T,trim_t,trim_r,trim_p,trim_y\n" -> send trim update once (msg_type=3).
@@ -146,8 +215,68 @@ static void parseTrimLine(const String &line) {
   pkt.trim_p = (int16_t)t[2];
   pkt.trim_y = (int16_t)t[3];
   pkt.msg_type = 3;
+  memcpy(pkt.target, receiverAddress, 6);
   pkt.seq = ++seqCounter;
-  esp_now_send(receiverAddress, (uint8_t *)&pkt, sizeof(pkt));
+  esp_now_send(broadcastAddress, (uint8_t *)&pkt, sizeof(pkt));
+}
+
+// Parse two hex nibbles starting at `idx` in `s`. Returns -1 on failure.
+static int parseHexByte(const String &s, int idx) {
+  if (idx + 1 >= (int)s.length()) return -1;
+  auto nib = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+  };
+  int hi = nib(s[idx]);
+  int lo = nib(s[idx + 1]);
+  if (hi < 0 || lo < 0) return -1;
+  return (hi << 4) | lo;
+}
+
+// "M,AA:BB:CC:DD:EE:FF" -> change which drone we ESP-NOW state packets to.
+// Re-adds the peer if needed. Silently ignored on parse failure.
+static void parseMacLine(const String &line) {
+  if (line.length() < 19) return;     // "M," + 17 chars MAC = 19
+  uint8_t mac[6];
+  int idx = 2;
+  for (int i = 0; i < 6; i++) {
+    int v = parseHexByte(line, idx);
+    if (v < 0) return;
+    mac[i] = (uint8_t)v;
+    idx += 2;
+    if (i < 5) {
+      if (idx >= (int)line.length() || (line[idx] != ':' && line[idx] != '-')) return;
+      idx += 1;
+    }
+  }
+
+  selectedReceiver = -1;
+  for (int i = 0; i < (int)RECEIVER_COUNT; i++) {
+    if (memcmp(mac, receiverTargets[i].mac, 6) == 0) {
+      selectedReceiver = i;
+      break;
+    }
+  }
+
+  setTargetMac(mac, selectedReceiver >= 0 ? receiverTargets[selectedReceiver].name : "custom");
+}
+
+// "R,1" / "R,2" / "R,3" -> select one of the configured receiver MACs above.
+static void parseReceiverSelectLine(const String &line) {
+  String part = line.substring(2);
+  part.trim();
+  int idx = part.toInt();
+  if (idx < 1 || idx > (int)RECEIVER_COUNT) {
+    Serial.printf("[sender] invalid receiver %d; use R,1..%u\n",
+                  idx, (unsigned)RECEIVER_COUNT);
+    return;
+  }
+
+  selectedReceiver = idx - 1;
+  setTargetMac(receiverTargets[selectedReceiver].mac,
+               receiverTargets[selectedReceiver].name);
 }
 
 static void parseSerialLine(const String &line) {
@@ -156,6 +285,8 @@ static void parseSerialLine(const String &line) {
     case 'S': parseStateLine(line); break;
     case 'P': parsePidLine(line);   break;
     case 'T': parseTrimLine(line);  break;
+    case 'M': parseMacLine(line);   break;
+    case 'R': parseReceiverSelectLine(line); break;
     default:                        break;
   }
 }
@@ -165,15 +296,29 @@ void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "ESP-NOW OK" : "ESP-NOW FAIL");
 }
 
-// Drone -> PC: decode TelemetryPacket and print yaw as "H<float>\n"
-// The Python backend (api/index.py) reads this in its heading reader thread.
+// Drone -> PC: decode TelemetryPacket. Prints up to two USB-serial lines:
+//   "H<float>\n"               heading -- ONLY from the currently-targeted drone,
+//                              otherwise a second powered-on drone would
+//                              interleave its yaw into the PC's heading filter
+//   "B<src_mac>,<mv>,<pct>\n"  battery telemetry, from EVERY drone (tagged by MAC)
+// The Python backend reads both in its serial reader thread.
 void OnDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   if (len != sizeof(TelemetryPacket)) return;
   TelemetryPacket t;
   memcpy(&t, data, sizeof(t));
-  float yaw_rad = (float)t.yaw_centirad / 10000.0f;
-  Serial.print("H");
-  Serial.println(yaw_rad, 4);
+
+  const uint8_t *m = info->src_addr;
+
+  if (memcmp(m, receiverAddress, 6) == 0) {
+    float yaw_rad = (float)t.yaw_centirad / 10000.0f;
+    Serial.print("H");
+    Serial.println(yaw_rad, 4);
+  }
+
+  Serial.printf("B%02X:%02X:%02X:%02X:%02X:%02X,%u,%u\n",
+                m[0], m[1], m[2], m[3], m[4], m[5],
+                (unsigned)t.battery_mv,
+                (unsigned)t.battery_pct);
 }
 
 void setup() {
@@ -198,21 +343,19 @@ void setup() {
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);
 
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, receiverAddress, 6);
-  peerInfo.channel = ESPNOW_CHANNEL;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Failed to add ESP-NOW peer");
+  if (!addBroadcastPeer()) {
+    Serial.println("Failed to add ESP-NOW broadcast peer");
     return;
   }
 
   // Safe defaults until the PC sends real state.
   latestState.armed = 0;
   latestState.msg_type = 0;
+  memcpy(latestState.target, receiverAddress, 6);  // default selection = receiver_1
 
   Serial.println("Transmitter ready: Python Serial -> ESP-NOW; ESP-NOW -> H<yaw>");
   Serial.println("Format: S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed");
+  Serial.println("Select receiver: R,1 / R,2 / R,3 or M,AA:BB:CC:DD:EE:FF");
 }
 
 void loop() {
@@ -230,7 +373,8 @@ void loop() {
   if (millis() - lastSend >= SEND_PERIOD_MS) {
     lastSend = millis();
     latestState.msg_type = 0;          // periodic stream is always msg_type=0
+    memcpy(latestState.target, receiverAddress, 6);
     latestState.seq = ++seqCounter;
-    esp_now_send(receiverAddress, (uint8_t *)&latestState, sizeof(latestState));
+    esp_now_send(broadcastAddress, (uint8_t *)&latestState, sizeof(latestState));
   }
 }

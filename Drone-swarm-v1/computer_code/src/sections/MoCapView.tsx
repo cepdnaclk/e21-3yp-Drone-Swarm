@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, Col, Form, Row } from "react-bootstrap";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stats } from "@react-three/drei";
@@ -96,7 +96,15 @@ export default function MoCapView() {
   const [cameraThresholds, setCameraThresholds] = useState<number[]>(
     () => Array(NUM_CAMERAS).fill(DEFAULT_THRESHOLD),
   );
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+  // Suppress the automatic threshold emit until the user actually moves a
+  // slider, so the mount-time defaults don't overwrite the backend's
+  // persisted values before the "settings" event arrives.
+  const thresholdsTouched = useRef(false);
+  // Anchor the drei <Stats> overlay inside this view. It defaults to
+  // document.body, which would keep it visible on every page now that all
+  // sections stay mounted.
+  const sceneFrameRef = useRef<HTMLDivElement>(null);
 
   const [cameraPoses, setCameraPoses] = useState<{ R: number[][]; t: number[] }[]>([]);
   const [, setToWorldCoordsMatrix] = useState<number[][] | null>(null);
@@ -163,10 +171,23 @@ export default function MoCapView() {
     socket.on("drone-state", (data: DroneState) => {
       setDroneState(data);
     });
+    socket.on("settings", (data: { pid?: number[]; thresholds?: number[] }) => {
+      if (Array.isArray(data?.pid)) {
+        const pid = data.pid;
+        setDronePID(DEFAULT_PID.map((d, i) =>
+          Number.isFinite(pid[i]) ? String(pid[i]) : d));
+      }
+      if (Array.isArray(data?.thresholds)) {
+        const thresholds = data.thresholds;
+        setCameraThresholds((prev) =>
+          prev.map((v, i) => (Number.isFinite(thresholds[i]) ? thresholds[i] : v)));
+      }
+    });
     return () => {
       socket.off("camera-pose");
       socket.off("to-world-coords-matrix");
       socket.off("drone-state");
+      socket.off("settings");
     };
   }, []);
 
@@ -185,6 +206,7 @@ export default function MoCapView() {
   }, [droneSetpoint]);
 
   useEffect(() => {
+    if (!thresholdsTouched.current) return;
     socket.emit("update-camera-settings", {
       thresholds: cameraThresholds.map((v) => Math.round(v)),
     });
@@ -195,8 +217,10 @@ export default function MoCapView() {
       thresholds: cameraThresholds.map((v) => Math.round(v)),
     });
     socket.emit("set-drone-pid", { dronePID: dronePID.map((x) => parseFloat(x)) });
-    setSaveStatus("saved");
-    window.setTimeout(() => setSaveStatus("idle"), 1500);
+    socket.emit("save-settings", {}, (res?: { ok?: boolean; error?: string }) => {
+      setSaveStatus(res?.ok ? "saved" : "error");
+      window.setTimeout(() => setSaveStatus("idle"), 1500);
+    });
   };
 
   const fmt = (x: number | null | undefined, digits = 3) =>
@@ -274,11 +298,17 @@ export default function MoCapView() {
         <Col md="auto">
           <button
             type="button"
-            className={`btn ${saveStatus === "saved" ? "btn-success" : "btn-primary"}`}
+            className={`btn ${
+              saveStatus === "saved" ? "btn-success"
+              : saveStatus === "error" ? "btn-danger"
+              : "btn-primary"
+            }`}
             onClick={saveSettings}
             disabled={!selectedMac && fleet.length > 0}
           >
-            {saveStatus === "saved" ? "Saved" : "Save settings"}
+            {saveStatus === "saved" ? "Saved"
+              : saveStatus === "error" ? "Save failed"
+              : "Save settings"}
           </button>
         </Col>
       </Row>
@@ -327,6 +357,7 @@ export default function MoCapView() {
                       value={value}
                       className="threshold-slider"
                       onChange={(e) => {
+                        thresholdsTouched.current = true;
                         const next = cameraThresholds.slice();
                         next[i] = parseInt(e.target.value, 10);
                         setCameraThresholds(next);
@@ -346,7 +377,7 @@ export default function MoCapView() {
           <Card className="app-panel shadow-sm mb-3 flex-fill">
             <Card.Body className="p-3 d-flex flex-column">
               <h5 className="panel-heading">3D scene</h5>
-              <div className="scene-frame mocap-scene-frame">
+              <div className="scene-frame mocap-scene-frame" ref={sceneFrameRef}>
                 <Canvas camera={{ position: [1.5, 1.5, 1.5], fov: 50 }}>
                   <ambientLight intensity={0.6} />
                   <directionalLight position={[5, 5, 5]} intensity={0.8} />
@@ -364,7 +395,7 @@ export default function MoCapView() {
                     </mesh>
                   )}
                   <OrbitControls />
-                  <Stats />
+                  <Stats parent={sceneFrameRef} />
                 </Canvas>
               </div>
             </Card.Body>

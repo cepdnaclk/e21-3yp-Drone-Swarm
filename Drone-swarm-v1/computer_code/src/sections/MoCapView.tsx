@@ -6,6 +6,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stats } from "@react-three/drei";
 
 import CameraWireframe from "../components/CameraWireframe";
+import PidErrorChart from "../components/PidErrorChart";
 import { socket } from "../shared/styles/scripts/socket";
 
 type FleetEntry = {
@@ -554,6 +555,16 @@ export default function MoCapView() {
               <div className="telemetry-line">
                 <small>A {droneState.sticks?.[4] ?? "-"}</small>
               </div>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row className="g-4">
+        <Col md={12}>
+          <Card className="app-panel shadow-sm mb-3">
+            <Card.Body className="p-3">
+              <PidErrorChart />
             </Card.Body>
           </Card>
         </Col>

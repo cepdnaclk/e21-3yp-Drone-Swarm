@@ -102,10 +102,15 @@ _selected_drone_mac = None  # which drone the MoCap section is currently control
 _battery_lock = threading.Lock()
 _battery = {}
 
-# Last PID gains pushed to the drone. The console's "pid <index> <value>"
-# command edits one slot of this and re-sends the full set.
-_pid_lock = threading.Lock()
-_current_pid = [
+# Persisted settings: PID gains + per-camera thresholds. Loaded from
+# settings.json at boot and written back when the UI clicks "Save settings".
+# The console's "pid <index> <value>" command edits one slot of the gains and
+# re-sends the full set.
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+NUM_PID = 17
+NUM_CAMERAS = 4
+DEFAULT_THRESHOLD = 180
+DEFAULT_PID = [
     2.5, 0.0, 0.4,      # xy pos
     3.5, 0.5, 0.5,      # z pos
     80.0, 10.0, 5.0,    # yaw
@@ -113,6 +118,34 @@ _current_pid = [
     120.0, 40.0, 20.0,  # z vel
     0.0, 0.0,           # ground effect
 ]
+
+
+def _load_settings():
+    """Return (pid, thresholds) from settings.json, defaults where missing."""
+    pid = list(DEFAULT_PID)
+    thresholds = [DEFAULT_THRESHOLD] * NUM_CAMERAS
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            raw = data.get("pid")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:NUM_PID]):
+                    pid[i] = float(v)
+            raw = data.get("thresholds")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:NUM_CAMERAS]):
+                    thresholds[i] = int(v)
+    except FileNotFoundError:
+        pass
+    except (json.JSONDecodeError, ValueError, TypeError, OSError) as e:
+        print(f"[settings] failed to load {SETTINGS_FILE}: {e}")
+    return pid, thresholds
+
+
+# _pid_lock guards both _current_pid and _camera_thresholds.
+_pid_lock = threading.Lock()
+_current_pid, _camera_thresholds = _load_settings()
 
 
 # =========================
@@ -793,6 +826,9 @@ def on_connect():
     with _fleet_lock:
         socketio.emit("fleet", {"drones": list(_fleet),
                                 "selected_mac": _selected_drone_mac})
+    with _pid_lock:
+        socketio.emit("settings", {"pid": list(_current_pid),
+                                   "thresholds": list(_camera_thresholds)})
 
 
 @socketio.on("drone-fleet-update")
@@ -926,19 +962,46 @@ def on_set_trim(data):
 
 @socketio.on("update-camera-settings")
 def on_camera_settings(data):
+    global _camera_thresholds
     # Webcams: thresholds are settable per-camera (preferred) or as a single value.
     if not isinstance(data, dict):
         return
     if "thresholds" in data and isinstance(data["thresholds"], list):
         try:
-            cameras.set_thresholds([int(v) for v in data["thresholds"]])
+            values = [int(v) for v in data["thresholds"]]
         except (ValueError, TypeError):
-            pass
+            return
+        cameras.set_thresholds(values)
+        with _pid_lock:
+            merged = list(_camera_thresholds)
+            for i, v in enumerate(values[:len(merged)]):
+                merged[i] = v
+            _camera_thresholds = merged
     elif "threshold" in data:
         try:
-            cameras.set_threshold(int(data["threshold"]))
+            value = int(data["threshold"])
         except (ValueError, TypeError):
-            pass
+            return
+        cameras.set_threshold(value)
+        with _pid_lock:
+            _camera_thresholds = [value] * NUM_CAMERAS
+
+
+@socketio.on("save-settings")
+def on_save_settings(_data=None):
+    """Write the current PID gains + camera thresholds to settings.json so
+    they survive a backend restart. The return value is the socket.io ack."""
+    with _pid_lock:
+        payload = {"pid": list(_current_pid),
+                   "thresholds": list(_camera_thresholds)}
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"[settings] saved to {SETTINGS_FILE}")
+        return {"ok": True}
+    except OSError as e:
+        print(f"[settings] failed to save {SETTINGS_FILE}: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # Compatibility no-ops so the existing frontend doesn't crash if it still emits them
@@ -978,6 +1041,13 @@ def _start_background_threads():
     if boot_mac is not None:
         _retarget_radio(boot_mac, force=True)
         print(f"[boot] radio target -> {boot_mac}")
+    # Apply the persisted settings: thresholds to the tracker, PID to the drone.
+    with _pid_lock:
+        boot_pid = list(_current_pid)
+        boot_thresholds = list(_camera_thresholds)
+    cameras.set_thresholds(boot_thresholds)
+    _serial_write(Controller.serialize_pid(boot_pid))
+    print(f"[boot] settings applied: thresholds={boot_thresholds}, pid={boot_pid}")
     cameras.start()
     threading.Thread(target=_heading_reader_loop, daemon=True, name="HeadingReader").start()
     threading.Thread(target=_control_loop, daemon=True, name="Control").start()

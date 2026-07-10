@@ -1,0 +1,37 @@
+# CO328 Week 6 - CI workflow
+# Runs the computer_code API unit test suite on every push and pull request.
+# The job fails if any test fails, blocking a broken merge.
+
+name: Unit Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (computer_code API)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: Drone-swarm-v1/computer_code/api
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        # opencv-python-headless: same cv2 API, no GUI libs needed on CI
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy opencv-python-headless pytest
+
+      - name: Run test suite
+        run: pytest tests -v --tb=short

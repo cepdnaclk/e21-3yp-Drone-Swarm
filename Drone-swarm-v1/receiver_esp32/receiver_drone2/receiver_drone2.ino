@@ -383,13 +383,13 @@ void setup() {
   }
 
   // PID configuration -- sample time 0 means "trust the caller's cadence".
-  xPosPID.SetMode(AUTOMATIC);    xPosPID.SetSampleTime(0);
-  yPosPID.SetMode(AUTOMATIC);    yPosPID.SetSampleTime(0);
-  zPosPID.SetMode(AUTOMATIC);    zPosPID.SetSampleTime(0);
-  yawPosPID.SetMode(AUTOMATIC);  yawPosPID.SetSampleTime(0);
-  xVelPID.SetMode(AUTOMATIC);    xVelPID.SetSampleTime(0);
-  yVelPID.SetMode(AUTOMATIC);    yVelPID.SetSampleTime(0);
-  zVelPID.SetMode(AUTOMATIC);    zVelPID.SetSampleTime(0);
+  xPosPID.SetMode(AUTOMATIC);    xPosPID.SetSampleTime(10);
+  yPosPID.SetMode(AUTOMATIC);    yPosPID.SetSampleTime(10);
+  zPosPID.SetMode(AUTOMATIC);    zPosPID.SetSampleTime(10);
+  yawPosPID.SetMode(AUTOMATIC);  yawPosPID.SetSampleTime(10);
+  xVelPID.SetMode(AUTOMATIC);    xVelPID.SetSampleTime(10);
+  yVelPID.SetMode(AUTOMATIC);    yVelPID.SetSampleTime(10);
+  zVelPID.SetMode(AUTOMATIC);    zVelPID.SetSampleTime(10);
 
   xPosPID.SetOutputLimits(-MAX_VEL, MAX_VEL);
   yPosPID.SetOutputLimits(-MAX_VEL, MAX_VEL);

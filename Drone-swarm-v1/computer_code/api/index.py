@@ -102,10 +102,10 @@ _selected_drone_mac = None  # which drone the MoCap section is currently control
 _battery_lock = threading.Lock()
 _battery = {}
 
-# Persisted settings: PID gains + per-camera thresholds. Loaded from
-# settings.json at boot and written back when the UI clicks "Save settings".
-# The console's "pid <index> <value>" command edits one slot of the gains and
-# re-sends the full set.
+# Persisted settings: PID gains, per-camera thresholds, trims, takeoff
+# altitude and setpoint. Loaded from settings.json at boot and written back
+# when the UI clicks "Save settings". The console's "pid <index> <value>"
+# command edits one slot of the gains and re-sends the full set.
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
 NUM_PID = 17
 NUM_CAMERAS = 4
@@ -118,12 +118,19 @@ DEFAULT_PID = [
     120.0, 40.0, 20.0,  # z vel
     0.0, 0.0,           # ground effect
 ]
+DEFAULT_TRIMS = [0, 0, 0, 0]        # T, R, P, Y in raw CRSF PWM units
+DEFAULT_TAKEOFF_Z = 0.20
+DEFAULT_SETPOINT = [0.0, 0.0, 0.20]
 
 
 def _load_settings():
-    """Return (pid, thresholds) from settings.json, defaults where missing."""
+    """Return (pid, thresholds, trims, takeoff_z, setpoint) from
+    settings.json, defaults where missing."""
     pid = list(DEFAULT_PID)
     thresholds = [DEFAULT_THRESHOLD] * NUM_CAMERAS
+    trims = list(DEFAULT_TRIMS)
+    takeoff_z = DEFAULT_TAKEOFF_Z
+    setpoint = list(DEFAULT_SETPOINT)
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -136,16 +143,28 @@ def _load_settings():
             if isinstance(raw, list):
                 for i, v in enumerate(raw[:NUM_CAMERAS]):
                     thresholds[i] = int(v)
+            raw = data.get("trims")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:4]):
+                    trims[i] = int(v)
+            raw = data.get("takeoff_z")
+            if isinstance(raw, (int, float)):
+                takeoff_z = float(raw)
+            raw = data.get("setpoint")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:3]):
+                    setpoint[i] = float(v)
     except FileNotFoundError:
         pass
     except (json.JSONDecodeError, ValueError, TypeError, OSError) as e:
         print(f"[settings] failed to load {SETTINGS_FILE}: {e}")
-    return pid, thresholds
+    return pid, thresholds, trims, takeoff_z, setpoint
 
 
-# _pid_lock guards both _current_pid and _camera_thresholds.
+# _pid_lock guards all the persisted-settings state below.
 _pid_lock = threading.Lock()
-_current_pid, _camera_thresholds = _load_settings()
+(_current_pid, _camera_thresholds, _current_trims,
+ _takeoff_z, _current_setpoint) = _load_settings()
 
 
 # =========================
@@ -828,7 +847,10 @@ def on_connect():
                                 "selected_mac": _selected_drone_mac})
     with _pid_lock:
         socketio.emit("settings", {"pid": list(_current_pid),
-                                   "thresholds": list(_camera_thresholds)})
+                                   "thresholds": list(_camera_thresholds),
+                                   "trims": list(_current_trims),
+                                   "takeoff_z": _takeoff_z,
+                                   "setpoint": list(_current_setpoint)})
 
 
 @socketio.on("drone-fleet-update")
@@ -907,12 +929,15 @@ def on_arm(data):
 
 @socketio.on("takeoff")
 def on_takeoff(data):
-    z = 0.20
+    global _takeoff_z
+    z = DEFAULT_TAKEOFF_Z
     if isinstance(data, dict) and "z" in data:
         try:
             z = float(data["z"])
         except (ValueError, TypeError):
             pass
+    with _pid_lock:
+        _takeoff_z = z
     controller.cmd_takeoff(z)
 
 
@@ -938,26 +963,34 @@ def on_set_pid(data):
 
 @socketio.on("set-drone-setpoint")
 def on_set_setpoint(data):
+    global _current_setpoint
     if isinstance(data, dict) and "droneSetpoint" in data:
         sp = data["droneSetpoint"]
         if isinstance(sp, list) and len(sp) >= 3:
             try:
-                controller.cmd_setpoint(float(sp[0]), float(sp[1]), float(sp[2]))
+                vals = [float(sp[0]), float(sp[1]), float(sp[2])]
             except (ValueError, TypeError):
-                pass
+                return
+            with _pid_lock:
+                _current_setpoint = vals
+            controller.cmd_setpoint(*vals)
 
 
 @socketio.on("set-drone-trim")
 def on_set_trim(data):
+    global _current_trims
     if not (isinstance(data, dict) and "droneTrim" in data):
         return
     tr = data["droneTrim"]
     if not (isinstance(tr, list) and len(tr) >= 4):
         return
     try:
-        _serial_write(Controller.serialize_trim(int(tr[0]), int(tr[1]), int(tr[2]), int(tr[3])))
+        vals = [int(tr[0]), int(tr[1]), int(tr[2]), int(tr[3])]
     except (ValueError, TypeError):
-        pass
+        return
+    with _pid_lock:
+        _current_trims = vals
+    _serial_write(Controller.serialize_trim(*vals))
 
 
 @socketio.on("update-camera-settings")
@@ -988,12 +1021,36 @@ def on_camera_settings(data):
 
 
 @socketio.on("save-settings")
-def on_save_settings(_data=None):
-    """Write the current PID gains + camera thresholds to settings.json so
-    they survive a backend restart. The return value is the socket.io ack."""
+def on_save_settings(data=None):
+    """Write every tunable (PID gains, camera thresholds, trims, takeoff
+    altitude, setpoint) to settings.json so they survive a backend restart.
+    The UI passes its current trim/takeoff/setpoint field values so a save
+    persists exactly what is on screen even if those fields were never
+    "sent"; without them the in-memory state is written as-is. The return
+    value is the socket.io ack."""
+    global _current_trims, _takeoff_z, _current_setpoint
     with _pid_lock:
+        if isinstance(data, dict):
+            raw = data.get("trims")
+            if isinstance(raw, list) and len(raw) >= 4:
+                try:
+                    _current_trims = [int(v) for v in raw[:4]]
+                except (ValueError, TypeError):
+                    pass
+            raw = data.get("takeoff_z")
+            if isinstance(raw, (int, float)):
+                _takeoff_z = float(raw)
+            raw = data.get("setpoint")
+            if isinstance(raw, list) and len(raw) >= 3:
+                try:
+                    _current_setpoint = [float(v) for v in raw[:3]]
+                except (ValueError, TypeError):
+                    pass
         payload = {"pid": list(_current_pid),
-                   "thresholds": list(_camera_thresholds)}
+                   "thresholds": list(_camera_thresholds),
+                   "trims": list(_current_trims),
+                   "takeoff_z": _takeoff_z,
+                   "setpoint": list(_current_setpoint)}
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -1041,13 +1098,20 @@ def _start_background_threads():
     if boot_mac is not None:
         _retarget_radio(boot_mac, force=True)
         print(f"[boot] radio target -> {boot_mac}")
-    # Apply the persisted settings: thresholds to the tracker, PID to the drone.
+    # Apply the persisted settings: thresholds to the tracker, PID + trims to
+    # the (selected) drone, setpoint to the controller. Takeoff altitude only
+    # lives in state — it is sent per takeoff command.
     with _pid_lock:
         boot_pid = list(_current_pid)
         boot_thresholds = list(_camera_thresholds)
+        boot_trims = list(_current_trims)
+        boot_setpoint = list(_current_setpoint)
     cameras.set_thresholds(boot_thresholds)
     _serial_write(Controller.serialize_pid(boot_pid))
-    print(f"[boot] settings applied: thresholds={boot_thresholds}, pid={boot_pid}")
+    _serial_write(Controller.serialize_trim(*boot_trims))
+    controller.cmd_setpoint(*boot_setpoint)
+    print(f"[boot] settings applied: thresholds={boot_thresholds}, pid={boot_pid}, "
+          f"trims={boot_trims}, setpoint={boot_setpoint}")
     cameras.start()
     threading.Thread(target=_heading_reader_loop, daemon=True, name="HeadingReader").start()
     threading.Thread(target=_control_loop, daemon=True, name="Control").start()

@@ -30,7 +30,9 @@ type Sample = {
 
 type ErrorMode = "xy" | "z";
 
-// Rolling window kept in the buffer and shown on the x axis.
+// Span of the x axis: only the most recent WINDOW_S seconds are drawn.
+// The full sample history is kept (until Clear) so CSV export covers the
+// whole session, not just the visible window.
 const WINDOW_S = 30;
 // Chart redraw period. Samples still buffer at the backend's full emit rate
 // (30 Hz); redrawing slower keeps React/chart.js work negligible.
@@ -44,6 +46,19 @@ const finite3 = (v: unknown): v is number[] =>
 
 const xyErr = (s: Sample) => Math.hypot(s.px - s.sx, s.py - s.sy);
 const zErr = (s: Sample) => s.pz - s.sz;
+
+// First index in `arr` (sorted by t) with t >= tMin. Binary search so the
+// per-redraw window slice stays cheap even after hours of samples.
+const lowerBound = (arr: Sample[], tMin: number) => {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].t < tMin) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+};
 
 export default function PidErrorChart() {
   const [mode, setMode] = useState<ErrorMode>("xy");
@@ -98,9 +113,9 @@ export default function PidErrorChart() {
       if (xyErr(s) > bandRef.current) lastOutXYRef.current = t;
       if (Math.abs(zErr(s)) > bandRef.current) lastOutZRef.current = t;
 
-      const buf = samplesRef.current;
-      buf.push(s);
-      while (buf.length > 0 && buf[0].t < t - WINDOW_S) buf.shift();
+      // Append-only: the whole session is kept so CSV export loses nothing.
+      // Drawing slices out the visible window below.
+      samplesRef.current.push(s);
     };
     socket.on("drone-state", onState);
     return () => {
@@ -143,6 +158,8 @@ export default function PidErrorChart() {
     setTick((x) => x + 1);
   };
 
+  // Exports the FULL history since session start (or the last Clear), not
+  // just the 30 s drawn on screen.
   const exportCsv = () => {
     const buf = samplesRef.current;
     if (buf.length === 0) return;
@@ -166,8 +183,11 @@ export default function PidErrorChart() {
     URL.revokeObjectURL(a.href);
   };
 
-  const samples = samplesRef.current;
-  const tLast = samples.length > 0 ? samples[samples.length - 1].t : 0;
+  const history = samplesRef.current;
+  const tLast = history.length > 0 ? history[history.length - 1].t : 0;
+  // Only the last WINDOW_S seconds are drawn (and used for the RMS/Peak
+  // readouts); the full history stays in the buffer for CSV export.
+  const samples = history.slice(lowerBound(history, tLast - WINDOW_S));
 
   const data: ChartData<"line", { x: number; y: number }[]> = {
     datasets:
@@ -321,7 +341,7 @@ export default function PidErrorChart() {
             type="button"
             className="btn btn-sm btn-outline-secondary"
             onClick={exportCsv}
-            disabled={samples.length === 0}
+            disabled={history.length === 0}
           >
             CSV
           </button>

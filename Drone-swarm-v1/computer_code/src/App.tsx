@@ -9,6 +9,7 @@ import DronesView from "./sections/DronesView";
 import ConsoleView from "./sections/ConsoleView";
 import UploadView from "./sections/UploadView";
 import CalibrationView from "./sections/CalibrationView";
+import CameraSettingsView from "./sections/CameraSettingsView";
 
 // Every section stays mounted; switching pages only toggles visibility.
 // This preserves each view's state (PID edits, console history, running
@@ -19,6 +20,7 @@ const SECTIONS: { id: SectionId; view: JSX.Element }[] = [
   { id: "console", view: <ConsoleView /> },
   { id: "upload", view: <UploadView /> },
   { id: "calibration", view: <CalibrationView /> },
+  { id: "camera-settings", view: <CameraSettingsView /> },
 ];
 
 export default function App() {

@@ -341,6 +341,19 @@ class Tracker:
             c.stop()
         self._cameras = []
 
+    def set_camera_indices(self, indices):
+        """Swap the USB device indices. If the tracker is running, releases
+        every capture and reopens on the new indices (blocks a few seconds)."""
+        indices = [int(i) for i in indices]
+        if len(indices) != len(self.intrinsics):
+            raise ValueError(f"expected {len(self.intrinsics)} camera indices")
+        was_running = self._running
+        if was_running:
+            self.stop()
+        self.camera_indices = indices
+        if was_running:
+            self.start()
+
     # ---- public read API ----
 
     def latest(self):

@@ -17,7 +17,8 @@ Serial protocol (sender_esp32.ino):
     ESP -> PC : "H<yaw>\n"      float radians (heading bridge)
 
 Environment:
-    SENDER_SERIAL_PORT   default 'COM5' on Windows
+    SENDER_SERIAL_PORT   default 'COM13' on Windows; a "serial_port" saved in
+                         settings.json (Camera Settings page) takes precedence
     SENDER_SERIAL_BAUD   default 115200
 """
 
@@ -29,6 +30,7 @@ import time
 
 import numpy as np
 import serial
+from serial.tools import list_ports
 from flask import Flask, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -37,6 +39,7 @@ from controller import Controller, ControlParams
 from helpers import Cameras
 from KalmanFilter import KalmanFilter
 from LowPassFilter import LowPassFilter
+from tracker import DEFAULT_CAMERA_INDICES
 
 
 # =========================
@@ -124,13 +127,15 @@ DEFAULT_SETPOINT = [0.0, 0.0, 0.20]
 
 
 def _load_settings():
-    """Return (pid, thresholds, trims, takeoff_z, setpoint) from
-    settings.json, defaults where missing."""
+    """Return (pid, thresholds, trims, takeoff_z, setpoint, camera_indices,
+    serial_port) from settings.json, defaults where missing."""
     pid = list(DEFAULT_PID)
     thresholds = [DEFAULT_THRESHOLD] * NUM_CAMERAS
     trims = list(DEFAULT_TRIMS)
     takeoff_z = DEFAULT_TAKEOFF_Z
     setpoint = list(DEFAULT_SETPOINT)
+    camera_indices = list(DEFAULT_CAMERA_INDICES)
+    serial_port = None
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -154,17 +159,49 @@ def _load_settings():
             if isinstance(raw, list):
                 for i, v in enumerate(raw[:3]):
                     setpoint[i] = float(v)
+            raw = data.get("camera_indices")
+            if isinstance(raw, list) and len(raw) == NUM_CAMERAS:
+                camera_indices = [int(v) for v in raw]
+            raw = data.get("serial_port")
+            if isinstance(raw, str) and raw.strip():
+                serial_port = raw.strip()
     except FileNotFoundError:
         pass
     except (json.JSONDecodeError, ValueError, TypeError, OSError) as e:
         print(f"[settings] failed to load {SETTINGS_FILE}: {e}")
-    return pid, thresholds, trims, takeoff_z, setpoint
+    return pid, thresholds, trims, takeoff_z, setpoint, camera_indices, serial_port
 
 
 # _pid_lock guards all the persisted-settings state below.
 _pid_lock = threading.Lock()
 (_current_pid, _camera_thresholds, _current_trims,
- _takeoff_z, _current_setpoint) = _load_settings()
+ _takeoff_z, _current_setpoint, _camera_indices,
+ _saved_serial_port) = _load_settings()
+if _saved_serial_port:
+    SERIAL_PORT = _saved_serial_port
+
+
+def _write_settings():
+    """Serialise every persisted tunable to settings.json. Caller must NOT
+    hold _pid_lock. Returns a socket.io-ack-shaped dict."""
+    with _pid_lock:
+        payload = {
+            "pid": list(_current_pid),
+            "thresholds": list(_camera_thresholds),
+            "trims": list(_current_trims),
+            "takeoff_z": _takeoff_z,
+            "setpoint": list(_current_setpoint),
+            "camera_indices": list(_camera_indices),
+            "serial_port": SERIAL_PORT,
+        }
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"[settings] saved to {SETTINGS_FILE}")
+        return {"ok": True}
+    except OSError as e:
+        print(f"[settings] failed to save {SETTINGS_FILE}: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # =========================
@@ -851,6 +888,7 @@ def on_connect():
                                    "trims": list(_current_trims),
                                    "takeoff_z": _takeoff_z,
                                    "setpoint": list(_current_setpoint)})
+    socketio.emit("hw-config", _hw_config_payload())
 
 
 @socketio.on("drone-fleet-update")
@@ -1020,6 +1058,123 @@ def on_camera_settings(data):
             _camera_thresholds = [value] * NUM_CAMERAS
 
 
+# =========================
+# Hardware config (camera indices + ground-ESP serial port), live-editable
+# =========================
+
+_camera_reload_lock = threading.Lock()
+
+
+def _available_ports():
+    try:
+        return [{"device": p.device, "description": p.description}
+                for p in list_ports.comports()]
+    except Exception as e:
+        print(f"[serial] port scan failed: {e}")
+        return []
+
+
+def _hw_config_payload():
+    with _pid_lock:
+        indices = list(_camera_indices)
+    return {
+        "camera_indices": indices,
+        "serial_port": SERIAL_PORT,
+        "serial_open": _ser is not None and _ser.is_open,
+        "serial_ports": _available_ports(),
+    }
+
+
+@socketio.on("get-hw-config")
+def on_get_hw_config(_data=None):
+    return _hw_config_payload()
+
+
+@socketio.on("set-camera-indices")
+def on_set_camera_indices(data):
+    """Swap the USB camera indices without a backend restart. The reload
+    (release + reopen all captures) runs on a worker thread because it takes
+    several seconds; progress goes out on the 'camera-reload' event."""
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    raw = data.get("indices")
+    if not isinstance(raw, list) or len(raw) != NUM_CAMERAS:
+        return {"ok": False, "error": f"need exactly {NUM_CAMERAS} camera indices"}
+    try:
+        indices = [int(v) for v in raw]
+    except (ValueError, TypeError):
+        return {"ok": False, "error": "indices must be integers"}
+    if any(i < 0 for i in indices):
+        return {"ok": False, "error": "indices must be >= 0"}
+    if len(set(indices)) != NUM_CAMERAS:
+        return {"ok": False, "error": "indices must be unique"}
+    if not _camera_reload_lock.acquire(blocking=False):
+        return {"ok": False, "error": "a camera reload is already in progress"}
+
+    def _reload():
+        global _camera_indices
+        try:
+            socketio.emit("camera-reload", {"status": "reloading", "indices": indices})
+            cameras.set_camera_indices(indices)
+            with _pid_lock:
+                _camera_indices = list(indices)
+            _write_settings()
+            socketio.emit("camera-reload", {"status": "done", "indices": indices})
+            socketio.emit("hw-config", _hw_config_payload())
+            print(f"[tracker] camera indices -> {indices}")
+        except Exception as e:
+            socketio.emit("camera-reload",
+                          {"status": "error", "error": str(e), "indices": indices})
+            print(f"[tracker] camera reload failed: {e}")
+        finally:
+            _camera_reload_lock.release()
+
+    threading.Thread(target=_reload, daemon=True, name="CameraReload").start()
+    return {"ok": True}
+
+
+@socketio.on("set-serial-port")
+def on_set_serial_port(data):
+    """Repoint the ground-ESP link at a new COM port without a backend
+    restart: close the old handle, open the new one, then re-sync the sender
+    (radio target, PID, trims) exactly like boot does."""
+    global SERIAL_PORT, _ser
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    port = str(data.get("port", "")).strip()
+    if not port:
+        return {"ok": False, "error": "no port given"}
+
+    with _ser_lock:
+        if _ser is not None:
+            try:
+                _ser.close()
+            except Exception:
+                pass
+        _ser = None
+    SERIAL_PORT = port
+    ser = _open_serial()
+    _write_settings()
+    socketio.emit("hw-config", _hw_config_payload())
+    if ser is None:
+        return {"ok": False, "error": f"could not open {port}"}
+
+    # The sender on the new port may be freshly plugged in / rebooted:
+    # re-send radio target, PID gains and trims so it isn't running stale.
+    with _fleet_lock:
+        sel = _selected_drone_mac or \
+            next((d["mac"] for d in _fleet if d["active"]), None)
+    if sel:
+        _retarget_radio(sel, force=True)
+    with _pid_lock:
+        pid = list(_current_pid)
+        trims = list(_current_trims)
+    _serial_write(Controller.serialize_pid(pid))
+    _serial_write(Controller.serialize_trim(*trims))
+    print(f"[serial] switched to {port}")
+    return {"ok": True, "port": port}
+
+
 @socketio.on("save-settings")
 def on_save_settings(data=None):
     """Write every tunable (PID gains, camera thresholds, trims, takeoff
@@ -1046,19 +1201,7 @@ def on_save_settings(data=None):
                     _current_setpoint = [float(v) for v in raw[:3]]
                 except (ValueError, TypeError):
                     pass
-        payload = {"pid": list(_current_pid),
-                   "thresholds": list(_camera_thresholds),
-                   "trims": list(_current_trims),
-                   "takeoff_z": _takeoff_z,
-                   "setpoint": list(_current_setpoint)}
-    try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-        print(f"[settings] saved to {SETTINGS_FILE}")
-        return {"ok": True}
-    except OSError as e:
-        print(f"[settings] failed to save {SETTINGS_FILE}: {e}")
-        return {"ok": False, "error": str(e)}
+    return _write_settings()
 
 
 # Compatibility no-ops so the existing frontend doesn't crash if it still emits them
@@ -1106,6 +1249,8 @@ def _start_background_threads():
         boot_thresholds = list(_camera_thresholds)
         boot_trims = list(_current_trims)
         boot_setpoint = list(_current_setpoint)
+        boot_indices = list(_camera_indices)
+    cameras.set_camera_indices(boot_indices)
     cameras.set_thresholds(boot_thresholds)
     _serial_write(Controller.serialize_pid(boot_pid))
     _serial_write(Controller.serialize_trim(*boot_trims))

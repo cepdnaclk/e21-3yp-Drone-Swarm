@@ -23,5 +23,24 @@
     29,
     0,
     0
-  ]
+  ],
+  "trims": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "takeoff_z": 0.2,
+  "setpoint": [
+    0.0,
+    0.0,
+    0.2
+  ],
+  "camera_indices": [
+    0,
+    2,
+    3,
+    4
+  ],
+  "serial_port": "COM13"
 }

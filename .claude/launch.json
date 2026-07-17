@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "cwd": "Drone-swarm-v1/computer_code",
       "port": 5173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["index.py"],
+      "cwd": "Drone-swarm-v1/computer_code/api",
+      "port": 3001
     }
   ]
 }

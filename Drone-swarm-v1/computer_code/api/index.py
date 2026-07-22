@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sys
 import threading
 import time
@@ -128,6 +129,16 @@ SERIAL_BAUD = int(_setting("SENDER_SERIAL_BAUD", "serial_baud", 115200))
 HOST = str(_setting("DRONESWARM_HOST", "host", "127.0.0.1"))
 PORT = int(_setting("DRONESWARM_PORT", "port", 3001))
 
+# Auto-shutdown when the last browser tab closes, so the packaged app doesn't
+# linger invisibly holding the cameras / serial / TCP port. Enabled for the
+# frozen desktop build (or DRONESWARM_IDLE_SHUTDOWN=1); off for `python index.py`
+# development, where the server is meant to be long-lived.
+IDLE_SHUTDOWN_ENABLED = FROZEN or os.environ.get("DRONESWARM_IDLE_SHUTDOWN") == "1"
+IDLE_SHUTDOWN_GRACE_S = float(_setting("DRONESWARM_IDLE_SHUTDOWN_S",
+                                       "idle_shutdown_seconds", 45))
+# Suppress all browser auto-opening (headless runs, CI, or user preference).
+BROWSER_SUPPRESSED = os.environ.get("DRONESWARM_NO_BROWSER") == "1"
+
 CONTROL_HZ = 60.0
 EMIT_HZ = 30.0
 HEADING_LPF_CUTOFF = 8.0
@@ -224,6 +235,32 @@ CORS(app, supports_credentials=True)
 # Without this, Flask-SocketIO will pick eventlet if it's installed and emits
 # from non-green threads silently never get delivered.
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+
+def _open_ui(url):
+    """Open the local UI in the default browser, honouring DRONESWARM_NO_BROWSER."""
+    if BROWSER_SUPPRESSED:
+        print(f"[boot] browser auto-open suppressed; open {url} manually")
+        return
+    webbrowser.open(url)
+
+
+def _another_instance_running():
+    """True if a Drone Swarm server is already listening on our port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.4)
+        return s.connect_ex(("127.0.0.1", PORT)) == 0
+
+
+# Single-instance guard: if another copy is already serving on our port, hand
+# off to it (open the browser at the running server) and exit *before* we touch
+# the USB cameras or serial port — so a second double-click can never disturb
+# the instance that's already running.
+if __name__ == "__main__" and _another_instance_running():
+    print(f"[boot] Drone Swarm already running on http://127.0.0.1:{PORT} "
+          f"- opening it instead of starting a second copy")
+    _open_ui(f"http://127.0.0.1:{PORT}")
+    sys.exit(0)
 
 cameras = Cameras.instance()
 kf = KalmanFilter()
@@ -892,12 +929,96 @@ def camera_stream():
 
 
 # =========================
+# Client tracking + idle auto-shutdown
+# =========================
+#
+# When the last browser tab closes we exit after a grace period so the packaged
+# app doesn't keep running invisibly. We NEVER shut down while a drone is armed
+# or flying: closing a tab must not drop the control link mid-flight. A short
+# grace also rides out an ordinary page refresh (disconnect + reconnect).
+
+_client_lock = threading.Lock()
+_client_count = 0
+_idle_timer = None            # threading.Timer, guarded by _client_lock
+
+
+def _controller_is_safe():
+    """True when it's safe to stop the backend (no armed/airborne drone)."""
+    try:
+        return controller.get_state() == "IDLE" and not controller.is_armed()
+    except Exception:
+        return True
+
+
+def _shutdown_now():
+    print("[shutdown] no clients connected and controller idle - exiting", flush=True)
+    try:
+        cameras.stop()
+    except Exception:
+        pass
+    # os._exit skips buffer flushing, so flush first or the log lines vanish
+    # when stdout is redirected to a file.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Hard exit: from a background timer thread the Werkzeug server can't be
+    # stopped cleanly, and a process exit reliably releases the TCP port, the
+    # USB cameras and the serial port. Daemon threads die with the process.
+    os._exit(0)
+
+
+def _cancel_idle_timer_locked():
+    global _idle_timer
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+        _idle_timer = None
+
+
+def _arm_idle_timer_locked():
+    global _idle_timer
+    _cancel_idle_timer_locked()
+    _idle_timer = threading.Timer(IDLE_SHUTDOWN_GRACE_S, _maybe_shutdown)
+    _idle_timer.daemon = True
+    _idle_timer.start()
+
+
+def _maybe_shutdown():
+    with _client_lock:
+        if _client_count > 0:
+            return  # a tab reconnected during the grace period
+        if not _controller_is_safe():
+            print("[shutdown] grace elapsed but a drone is armed/flying - "
+                  "staying up (will re-check).", flush=True)
+            _arm_idle_timer_locked()
+            return
+    _shutdown_now()
+
+
+def _client_connected():
+    global _client_count
+    with _client_lock:
+        _client_count += 1
+        _cancel_idle_timer_locked()
+
+
+def _client_disconnected():
+    global _client_count
+    with _client_lock:
+        _client_count = max(0, _client_count - 1)
+        if not (IDLE_SHUTDOWN_ENABLED and _client_count == 0):
+            return
+        _arm_idle_timer_locked()
+    print(f"[shutdown] last tab closed - exiting in {IDLE_SHUTDOWN_GRACE_S:.0f}s "
+          f"unless a tab reconnects or a drone is flying", flush=True)
+
+
+# =========================
 # SocketIO events
 # =========================
 
 @socketio.on("connect")
 def on_connect():
     """Push pre-baked calibration to the frontend so it can draw camera wireframes."""
+    _client_connected()
     poses = cameras.camera_poses_in_world()
     socketio.emit("camera-pose", {"camera_poses": poses})
     socketio.emit("to-world-coords-matrix",
@@ -905,6 +1026,11 @@ def on_connect():
     with _fleet_lock:
         socketio.emit("fleet", {"drones": list(_fleet),
                                 "selected_mac": _selected_drone_mac})
+
+
+@socketio.on("disconnect")
+def on_disconnect():
+    _client_disconnected()
 
 
 @socketio.on("drone-fleet-update")
@@ -1104,7 +1230,7 @@ def _maybe_open_browser():
         return
     url = f"http://127.0.0.1:{PORT}"
     print(f"[boot] opening browser at {url}")
-    threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    threading.Timer(1.5, lambda: _open_ui(url)).start()
 
 
 if __name__ == "__main__":

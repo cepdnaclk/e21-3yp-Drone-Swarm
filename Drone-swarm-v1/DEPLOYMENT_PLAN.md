@@ -337,6 +337,10 @@ The final user experience should be:
 
 
 cd Drone-swarm-v1/computer_code
+# 2. Create the venv (uses your Python 3.10)
+python -m venv venv
+# 3. Activate it
+.\venv\Scripts\Activate.ps1         
 pip install -r api/requirements.txt -r api/requirements-build.txt
 npm install && npm run build
 pyinstaller api/droneswarm.spec --noconfirm --distpath dist_exe

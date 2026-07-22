@@ -5,7 +5,8 @@ export type SectionId =
   | "drones"
   | "console"
   | "upload"
-  | "calibration";
+  | "calibration"
+  | "camera-settings";
 
 type NavItem = {
   id: SectionId;
@@ -19,7 +20,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: "drones", label: "Drones", hint: "Fleet & status", icon: "D" },
   { id: "console", label: "Console", hint: "Command stream", icon: "C" },
   { id: "upload", label: "Algorithm", hint: "Upload .py script", icon: "U" },
-  { id: "calibration", label: "Calibration", hint: "Camera intrinsics", icon: "K" },
+  { id: "calibration", label: "Calibration", hint: "Cameras → world pipeline", icon: "K" },
+  { id: "camera-settings", label: "Camera Settings", hint: "Indices & serial port", icon: "S" },
 ];
 
 type Props = {

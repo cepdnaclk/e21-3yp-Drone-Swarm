@@ -9,6 +9,19 @@ import DronesView from "./sections/DronesView";
 import ConsoleView from "./sections/ConsoleView";
 import UploadView from "./sections/UploadView";
 import CalibrationView from "./sections/CalibrationView";
+import CameraSettingsView from "./sections/CameraSettingsView";
+
+// Every section stays mounted; switching pages only toggles visibility.
+// This preserves each view's state (PID edits, console history, running
+// algorithm logs, calibration progress) and keeps their socket streams alive.
+const SECTIONS: { id: SectionId; view: JSX.Element }[] = [
+  { id: "mocap", view: <MoCapView /> },
+  { id: "drones", view: <DronesView /> },
+  { id: "console", view: <ConsoleView /> },
+  { id: "upload", view: <UploadView /> },
+  { id: "calibration", view: <CalibrationView /> },
+  { id: "camera-settings", view: <CameraSettingsView /> },
+];
 
 export default function App() {
   const [section, setSection] = useState<SectionId>("mocap");
@@ -18,11 +31,11 @@ export default function App() {
       <Sidebar active={section} onSelect={setSection} />
       <main className="app-main">
         <Container fluid className="app-shell">
-          {section === "mocap" && <MoCapView />}
-          {section === "drones" && <DronesView />}
-          {section === "console" && <ConsoleView />}
-          {section === "upload" && <UploadView />}
-          {section === "calibration" && <CalibrationView />}
+          {SECTIONS.map(({ id, view }) => (
+            <div key={id} style={{ display: id === section ? undefined : "none" }}>
+              {view}
+            </div>
+          ))}
         </Container>
       </main>
     </div>

@@ -27,6 +27,14 @@ class Cameras:
             self.tracker.stop()
             self._started = False
 
+    @property
+    def started(self):
+        return self._started
+
+    def reload_calibration(self):
+        """Re-read calibration files (used after the wizard promotes a new set)."""
+        self.tracker.reload_calibration()
+
     # ---- read API ----
 
     def get_grid_jpeg(self):
@@ -47,6 +55,13 @@ class Cameras:
 
     def set_thresholds(self, values):
         self.tracker.set_thresholds(values)
+
+    def get_camera_indices(self):
+        return list(self.tracker.camera_indices)
+
+    def set_camera_indices(self, indices):
+        """Change USB device indices; reloads the cameras if already running."""
+        self.tracker.set_camera_indices(indices)
 
     # ---- frontend init payload ----
 

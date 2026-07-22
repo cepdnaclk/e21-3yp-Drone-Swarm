@@ -17,7 +17,8 @@ Serial protocol (sender_esp32.ino):
     ESP -> PC : "H<yaw>\n"      float radians (heading bridge)
 
 Environment:
-    SENDER_SERIAL_PORT   default 'COM5' on Windows
+    SENDER_SERIAL_PORT   default 'COM13' on Windows; a "serial_port" saved in
+                         settings.json (Camera Settings page) takes precedence
     SENDER_SERIAL_BAUD   default 115200
 """
 
@@ -29,21 +30,24 @@ import time
 
 import numpy as np
 import serial
+from serial.tools import list_ports
 from flask import Flask, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
+from calibration_manager import CalibrationManager
 from controller import Controller, ControlParams
 from helpers import Cameras
 from KalmanFilter import KalmanFilter
 from LowPassFilter import LowPassFilter
+from tracker import DEFAULT_CAMERA_INDICES
 
 
 # =========================
 # Config
 # =========================
 
-SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM10")
+SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM13")
 SERIAL_BAUD = int(os.environ.get("SENDER_SERIAL_BAUD", "115200"))
 
 CONTROL_HZ = 60.0
@@ -102,10 +106,15 @@ _selected_drone_mac = None  # which drone the MoCap section is currently control
 _battery_lock = threading.Lock()
 _battery = {}
 
-# Last PID gains pushed to the drone. The console's "pid <index> <value>"
-# command edits one slot of this and re-sends the full set.
-_pid_lock = threading.Lock()
-_current_pid = [
+# Persisted settings: PID gains, per-camera thresholds, trims, takeoff
+# altitude and setpoint. Loaded from settings.json at boot and written back
+# when the UI clicks "Save settings". The console's "pid <index> <value>"
+# command edits one slot of the gains and re-sends the full set.
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+NUM_PID = 17
+NUM_CAMERAS = 4
+DEFAULT_THRESHOLD = 180
+DEFAULT_PID = [
     2.5, 0.0, 0.4,      # xy pos
     3.5, 0.5, 0.5,      # z pos
     80.0, 10.0, 5.0,    # yaw
@@ -113,6 +122,87 @@ _current_pid = [
     120.0, 40.0, 20.0,  # z vel
     0.0, 0.0,           # ground effect
 ]
+DEFAULT_TRIMS = [0, 0, 0, 0]        # T, R, P, Y in raw CRSF PWM units
+DEFAULT_TAKEOFF_Z = 0.20
+DEFAULT_SETPOINT = [0.0, 0.0, 0.20]
+
+
+def _load_settings():
+    """Return (pid, thresholds, trims, takeoff_z, setpoint, camera_indices,
+    serial_port) from settings.json, defaults where missing."""
+    pid = list(DEFAULT_PID)
+    thresholds = [DEFAULT_THRESHOLD] * NUM_CAMERAS
+    trims = list(DEFAULT_TRIMS)
+    takeoff_z = DEFAULT_TAKEOFF_Z
+    setpoint = list(DEFAULT_SETPOINT)
+    camera_indices = list(DEFAULT_CAMERA_INDICES)
+    serial_port = None
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            raw = data.get("pid")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:NUM_PID]):
+                    pid[i] = float(v)
+            raw = data.get("thresholds")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:NUM_CAMERAS]):
+                    thresholds[i] = int(v)
+            raw = data.get("trims")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:4]):
+                    trims[i] = int(v)
+            raw = data.get("takeoff_z")
+            if isinstance(raw, (int, float)):
+                takeoff_z = float(raw)
+            raw = data.get("setpoint")
+            if isinstance(raw, list):
+                for i, v in enumerate(raw[:3]):
+                    setpoint[i] = float(v)
+            raw = data.get("camera_indices")
+            if isinstance(raw, list) and len(raw) == NUM_CAMERAS:
+                camera_indices = [int(v) for v in raw]
+            raw = data.get("serial_port")
+            if isinstance(raw, str) and raw.strip():
+                serial_port = raw.strip()
+    except FileNotFoundError:
+        pass
+    except (json.JSONDecodeError, ValueError, TypeError, OSError) as e:
+        print(f"[settings] failed to load {SETTINGS_FILE}: {e}")
+    return pid, thresholds, trims, takeoff_z, setpoint, camera_indices, serial_port
+
+
+# _pid_lock guards all the persisted-settings state below.
+_pid_lock = threading.Lock()
+(_current_pid, _camera_thresholds, _current_trims,
+ _takeoff_z, _current_setpoint, _camera_indices,
+ _saved_serial_port) = _load_settings()
+if _saved_serial_port:
+    SERIAL_PORT = _saved_serial_port
+
+
+def _write_settings():
+    """Serialise every persisted tunable to settings.json. Caller must NOT
+    hold _pid_lock. Returns a socket.io-ack-shaped dict."""
+    with _pid_lock:
+        payload = {
+            "pid": list(_current_pid),
+            "thresholds": list(_camera_thresholds),
+            "trims": list(_current_trims),
+            "takeoff_z": _takeoff_z,
+            "setpoint": list(_current_setpoint),
+            "camera_indices": list(_camera_indices),
+            "serial_port": SERIAL_PORT,
+        }
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"[settings] saved to {SETTINGS_FILE}")
+        return {"ok": True}
+    except OSError as e:
+        print(f"[settings] failed to save {SETTINGS_FILE}: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # =========================
@@ -246,8 +336,29 @@ def _control_loop():
     last_step_t = time.perf_counter()
     emit_period = 1.0 / EMIT_HZ
     next_emit_t = next_t
+    calib_paused = False
 
     while True:
+        # ---- Calibration mode: halt the whole control pipeline. The wizard
+        # owns the cameras and the drone must stay on the ground, so we stop
+        # stepping the controller and stop writing S-lines to the sender.
+        if calibration.active:
+            if not calib_paused:
+                calib_paused = True
+                controller.cmd_arm(False)
+                with _state_lock:
+                    _emit_state["state"] = "CALIBRATING"
+                    _emit_state["armed"] = 0
+                print("[control] paused for calibration")
+            time.sleep(0.1)
+            next_t = time.perf_counter() + period
+            last_step_t = time.perf_counter()
+            continue
+        if calib_paused:
+            calib_paused = False
+            last_fix_id = -1
+            print("[control] resumed after calibration")
+
         # Pace the loop precisely
         now = time.perf_counter()
         if now < next_t:
@@ -494,6 +605,12 @@ def on_console_command(data):
     command = str(data.get("command", "")).strip().lower()
     args = [str(a) for a in (data.get("args") or [])]
 
+    if calibration.active and command not in ("ping", "estop", "land"):
+        socketio.emit("console-error", {
+            "target": target,
+            "text": "calibration in progress — flight commands are disabled"})
+        return
+
     try:
         entry = _resolve_target(target)
         _retarget_radio(entry["mac"])
@@ -727,12 +844,135 @@ class AlgorithmRunner:
 _algorithm_runner = AlgorithmRunner()
 
 
+# =========================
+# Calibration wizard
+# =========================
+
+def _emit_tracker_poses():
+    """Re-broadcast the tracker's calibration-derived scene data (used after a
+    new calibration set is accepted)."""
+    socketio.emit("camera-pose", {"camera_poses": cameras.camera_poses_in_world()})
+    socketio.emit("to-world-coords-matrix",
+                  {"to_world_coords_matrix": cameras.world_matrix_4x4_metres()})
+
+
+def _calib_camera_indices():
+    with _pid_lock:
+        return list(_camera_indices)
+
+
+def _calib_thresholds():
+    with _pid_lock:
+        return list(_camera_thresholds)
+
+
+calibration = CalibrationManager(
+    base_dir=os.path.dirname(os.path.abspath(__file__)),
+    socketio=socketio,
+    hooks={
+        "stop_tracker": cameras.stop,
+        "start_tracker": cameras.start,
+        "reload_tracker": cameras.reload_calibration,
+        "emit_tracker_poses": _emit_tracker_poses,
+        "get_camera_indices": _calib_camera_indices,
+        "get_thresholds": _calib_thresholds,
+        "get_drone_state": controller.get_state,
+        "algorithm_running": lambda: _algorithm_runner.running(),
+    },
+)
+
+
+@socketio.on("calibration-get-status")
+def on_calibration_get_status(_data=None):
+    return calibration.status()
+
+
+@socketio.on("calibration-start")
+def on_calibration_start(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    # Serialise against the camera-indices reload worker: both sides restart
+    # captures and must not overlap.
+    if not _camera_reload_lock.acquire(blocking=False):
+        return {"ok": False, "error": "a camera reload is in progress — retry shortly"}
+    try:
+        return calibration.start(
+            start_from=str(data.get("start_from", "intrinsics")),
+            checkerboard=data.get("checkerboard", [9, 6]),
+            square_size_mm=data.get("square_size_mm", 23.9),
+        )
+    finally:
+        _camera_reload_lock.release()
+
+
+@socketio.on("calibration-cancel")
+def on_calibration_cancel(_data=None):
+    return calibration.cancel()
+
+
+@socketio.on("calibration-accept")
+def on_calibration_accept(_data=None):
+    return calibration.accept()
+
+
+@socketio.on("calibration-next")
+def on_calibration_next(_data=None):
+    return calibration.next_step()
+
+
+@socketio.on("calibration-restart")
+def on_calibration_restart(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.restart_from(str(data.get("step", "")), data.get("cam"))
+
+
+@socketio.on("calibration-capture")
+def on_calibration_capture(_data=None):
+    return calibration.capture()
+
+
+@socketio.on("calibration-set-active-camera")
+def on_calibration_set_active_camera(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.set_active_camera(data.get("cam"))
+
+
+@socketio.on("calibration-set-thresholds")
+def on_calibration_set_thresholds(data):
+    if not isinstance(data, dict) or not isinstance(data.get("thresholds"), list):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.set_thresholds(data["thresholds"])
+
+
+@socketio.on("calibration-compute")
+def on_calibration_compute(_data=None):
+    return calibration.compute()
+
+
+@socketio.on("calibration-capture-landmark")
+def on_calibration_capture_landmark(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.capture_landmark(data.get("name"), data.get("world"))
+
+
+@socketio.on("calibration-delete-landmark")
+def on_calibration_delete_landmark(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.delete_landmark(str(data.get("name", "")))
+
+
 @socketio.on("algorithm-upload")
 def on_algorithm_upload(data):
     """Receive a .py mission script and start executing it. The return value
     doubles as the socket.io ack payload for the frontend's callback."""
     if not isinstance(data, dict):
         return {"ok": False, "error": "bad payload"}
+    if calibration.active:
+        return {"ok": False, "error": "calibration in progress — finish or cancel it first"}
     filename = str(data.get("filename", "algorithm.py"))
     source = data.get("source")
     if not filename.lower().endswith(".py"):
@@ -760,7 +1000,9 @@ def on_algorithm_stop(_data=None):
 
 @app.route("/api/camera-stream")
 def camera_stream():
-    cameras.start()
+    # During calibration the wizard owns the cameras; don't restart the tracker.
+    if not calibration.active:
+        cameras.start()
 
     def gen():
         boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
@@ -772,6 +1014,27 @@ def camera_stream():
                 time.sleep(max(0.0, next_t - now))
             next_t = time.perf_counter() + target_period
             jpeg = cameras.get_grid_jpeg()
+            if not jpeg:
+                continue
+            yield boundary + jpeg + b"\r\n"
+
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/api/calibration-stream")
+def calibration_stream():
+    """MJPEG live view for the calibration wizard (placeholder frame when no
+    session is running)."""
+    def gen():
+        boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+        target_period = 1.0 / 15.0
+        next_t = time.perf_counter()
+        while True:
+            now = time.perf_counter()
+            if now < next_t:
+                time.sleep(max(0.0, next_t - now))
+            next_t = time.perf_counter() + target_period
+            jpeg = calibration.latest_jpeg()
             if not jpeg:
                 continue
             yield boundary + jpeg + b"\r\n"
@@ -793,6 +1056,14 @@ def on_connect():
     with _fleet_lock:
         socketio.emit("fleet", {"drones": list(_fleet),
                                 "selected_mac": _selected_drone_mac})
+    with _pid_lock:
+        socketio.emit("settings", {"pid": list(_current_pid),
+                                   "thresholds": list(_camera_thresholds),
+                                   "trims": list(_current_trims),
+                                   "takeoff_z": _takeoff_z,
+                                   "setpoint": list(_current_setpoint)})
+    socketio.emit("hw-config", _hw_config_payload())
+    socketio.emit("calibration-status", calibration.status())
 
 
 @socketio.on("drone-fleet-update")
@@ -865,18 +1136,30 @@ def on_arm(data):
             armed = bool(data["armed"])
         elif "droneArmed" in data and isinstance(data["droneArmed"], list) and data["droneArmed"]:
             armed = bool(data["droneArmed"][0])
+    if armed and calibration.active:
+        # MoCap re-emits the arm state every 500 ms; drop silently to avoid
+        # spamming errors. The control loop is paused anyway.
+        return
     print(f"[socket] arm-drone -> armed={armed}")
     controller.cmd_arm(armed)
 
 
 @socketio.on("takeoff")
 def on_takeoff(data):
-    z = 0.20
+    global _takeoff_z
+    if calibration.active:
+        socketio.emit("console-error", {
+            "target": "all",
+            "text": "calibration in progress — flight commands are disabled"})
+        return
+    z = DEFAULT_TAKEOFF_Z
     if isinstance(data, dict) and "z" in data:
         try:
             z = float(data["z"])
         except (ValueError, TypeError):
             pass
+    with _pid_lock:
+        _takeoff_z = z
     controller.cmd_takeoff(z)
 
 
@@ -902,43 +1185,210 @@ def on_set_pid(data):
 
 @socketio.on("set-drone-setpoint")
 def on_set_setpoint(data):
+    global _current_setpoint
     if isinstance(data, dict) and "droneSetpoint" in data:
         sp = data["droneSetpoint"]
         if isinstance(sp, list) and len(sp) >= 3:
             try:
-                controller.cmd_setpoint(float(sp[0]), float(sp[1]), float(sp[2]))
+                vals = [float(sp[0]), float(sp[1]), float(sp[2])]
             except (ValueError, TypeError):
-                pass
+                return
+            with _pid_lock:
+                _current_setpoint = vals
+            controller.cmd_setpoint(*vals)
 
 
 @socketio.on("set-drone-trim")
 def on_set_trim(data):
+    global _current_trims
     if not (isinstance(data, dict) and "droneTrim" in data):
         return
     tr = data["droneTrim"]
     if not (isinstance(tr, list) and len(tr) >= 4):
         return
     try:
-        _serial_write(Controller.serialize_trim(int(tr[0]), int(tr[1]), int(tr[2]), int(tr[3])))
+        vals = [int(tr[0]), int(tr[1]), int(tr[2]), int(tr[3])]
     except (ValueError, TypeError):
-        pass
+        return
+    with _pid_lock:
+        _current_trims = vals
+    _serial_write(Controller.serialize_trim(*vals))
 
 
 @socketio.on("update-camera-settings")
 def on_camera_settings(data):
+    global _camera_thresholds
     # Webcams: thresholds are settable per-camera (preferred) or as a single value.
     if not isinstance(data, dict):
         return
     if "thresholds" in data and isinstance(data["thresholds"], list):
         try:
-            cameras.set_thresholds([int(v) for v in data["thresholds"]])
+            values = [int(v) for v in data["thresholds"]]
         except (ValueError, TypeError):
-            pass
+            return
+        cameras.set_thresholds(values)
+        with _pid_lock:
+            merged = list(_camera_thresholds)
+            for i, v in enumerate(values[:len(merged)]):
+                merged[i] = v
+            _camera_thresholds = merged
     elif "threshold" in data:
         try:
-            cameras.set_threshold(int(data["threshold"]))
+            value = int(data["threshold"])
         except (ValueError, TypeError):
-            pass
+            return
+        cameras.set_threshold(value)
+        with _pid_lock:
+            _camera_thresholds = [value] * NUM_CAMERAS
+
+
+# =========================
+# Hardware config (camera indices + ground-ESP serial port), live-editable
+# =========================
+
+_camera_reload_lock = threading.Lock()
+
+
+def _available_ports():
+    try:
+        return [{"device": p.device, "description": p.description}
+                for p in list_ports.comports()]
+    except Exception as e:
+        print(f"[serial] port scan failed: {e}")
+        return []
+
+
+def _hw_config_payload():
+    with _pid_lock:
+        indices = list(_camera_indices)
+    return {
+        "camera_indices": indices,
+        "serial_port": SERIAL_PORT,
+        "serial_open": _ser is not None and _ser.is_open,
+        "serial_ports": _available_ports(),
+    }
+
+
+@socketio.on("get-hw-config")
+def on_get_hw_config(_data=None):
+    return _hw_config_payload()
+
+
+@socketio.on("set-camera-indices")
+def on_set_camera_indices(data):
+    """Swap the USB camera indices without a backend restart. The reload
+    (release + reopen all captures) runs on a worker thread because it takes
+    several seconds; progress goes out on the 'camera-reload' event."""
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    raw = data.get("indices")
+    if not isinstance(raw, list) or len(raw) != NUM_CAMERAS:
+        return {"ok": False, "error": f"need exactly {NUM_CAMERAS} camera indices"}
+    try:
+        indices = [int(v) for v in raw]
+    except (ValueError, TypeError):
+        return {"ok": False, "error": "indices must be integers"}
+    if any(i < 0 for i in indices):
+        return {"ok": False, "error": "indices must be >= 0"}
+    if len(set(indices)) != NUM_CAMERAS:
+        return {"ok": False, "error": "indices must be unique"}
+    if calibration.active:
+        return {"ok": False, "error":
+                "calibration in progress — finish or cancel it before changing cameras"}
+    if not _camera_reload_lock.acquire(blocking=False):
+        return {"ok": False, "error": "a camera reload is already in progress"}
+
+    def _reload():
+        global _camera_indices
+        try:
+            socketio.emit("camera-reload", {"status": "reloading", "indices": indices})
+            cameras.set_camera_indices(indices)
+            with _pid_lock:
+                _camera_indices = list(indices)
+            _write_settings()
+            socketio.emit("camera-reload", {"status": "done", "indices": indices})
+            socketio.emit("hw-config", _hw_config_payload())
+            print(f"[tracker] camera indices -> {indices}")
+        except Exception as e:
+            socketio.emit("camera-reload",
+                          {"status": "error", "error": str(e), "indices": indices})
+            print(f"[tracker] camera reload failed: {e}")
+        finally:
+            _camera_reload_lock.release()
+
+    threading.Thread(target=_reload, daemon=True, name="CameraReload").start()
+    return {"ok": True}
+
+
+@socketio.on("set-serial-port")
+def on_set_serial_port(data):
+    """Repoint the ground-ESP link at a new COM port without a backend
+    restart: close the old handle, open the new one, then re-sync the sender
+    (radio target, PID, trims) exactly like boot does."""
+    global SERIAL_PORT, _ser
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    port = str(data.get("port", "")).strip()
+    if not port:
+        return {"ok": False, "error": "no port given"}
+
+    with _ser_lock:
+        if _ser is not None:
+            try:
+                _ser.close()
+            except Exception:
+                pass
+        _ser = None
+    SERIAL_PORT = port
+    ser = _open_serial()
+    _write_settings()
+    socketio.emit("hw-config", _hw_config_payload())
+    if ser is None:
+        return {"ok": False, "error": f"could not open {port}"}
+
+    # The sender on the new port may be freshly plugged in / rebooted:
+    # re-send radio target, PID gains and trims so it isn't running stale.
+    with _fleet_lock:
+        sel = _selected_drone_mac or \
+            next((d["mac"] for d in _fleet if d["active"]), None)
+    if sel:
+        _retarget_radio(sel, force=True)
+    with _pid_lock:
+        pid = list(_current_pid)
+        trims = list(_current_trims)
+    _serial_write(Controller.serialize_pid(pid))
+    _serial_write(Controller.serialize_trim(*trims))
+    print(f"[serial] switched to {port}")
+    return {"ok": True, "port": port}
+
+
+@socketio.on("save-settings")
+def on_save_settings(data=None):
+    """Write every tunable (PID gains, camera thresholds, trims, takeoff
+    altitude, setpoint) to settings.json so they survive a backend restart.
+    The UI passes its current trim/takeoff/setpoint field values so a save
+    persists exactly what is on screen even if those fields were never
+    "sent"; without them the in-memory state is written as-is. The return
+    value is the socket.io ack."""
+    global _current_trims, _takeoff_z, _current_setpoint
+    with _pid_lock:
+        if isinstance(data, dict):
+            raw = data.get("trims")
+            if isinstance(raw, list) and len(raw) >= 4:
+                try:
+                    _current_trims = [int(v) for v in raw[:4]]
+                except (ValueError, TypeError):
+                    pass
+            raw = data.get("takeoff_z")
+            if isinstance(raw, (int, float)):
+                _takeoff_z = float(raw)
+            raw = data.get("setpoint")
+            if isinstance(raw, list) and len(raw) >= 3:
+                try:
+                    _current_setpoint = [float(v) for v in raw[:3]]
+                except (ValueError, TypeError):
+                    pass
+    return _write_settings()
 
 
 # Compatibility no-ops so the existing frontend doesn't crash if it still emits them
@@ -961,7 +1411,8 @@ def _noop_determine_scale(_): pass
 def on_triangulate_points(_data):
     # Legacy event used to toggle the tracking pipeline. We always track when
     # the camera stream is active, so just make sure cameras are running.
-    cameras.start()
+    if not calibration.active:
+        cameras.start()
 
 
 # =========================
@@ -978,6 +1429,22 @@ def _start_background_threads():
     if boot_mac is not None:
         _retarget_radio(boot_mac, force=True)
         print(f"[boot] radio target -> {boot_mac}")
+    # Apply the persisted settings: thresholds to the tracker, PID + trims to
+    # the (selected) drone, setpoint to the controller. Takeoff altitude only
+    # lives in state — it is sent per takeoff command.
+    with _pid_lock:
+        boot_pid = list(_current_pid)
+        boot_thresholds = list(_camera_thresholds)
+        boot_trims = list(_current_trims)
+        boot_setpoint = list(_current_setpoint)
+        boot_indices = list(_camera_indices)
+    cameras.set_camera_indices(boot_indices)
+    cameras.set_thresholds(boot_thresholds)
+    _serial_write(Controller.serialize_pid(boot_pid))
+    _serial_write(Controller.serialize_trim(*boot_trims))
+    controller.cmd_setpoint(*boot_setpoint)
+    print(f"[boot] settings applied: thresholds={boot_thresholds}, pid={boot_pid}, "
+          f"trims={boot_trims}, setpoint={boot_setpoint}")
     cameras.start()
     threading.Thread(target=_heading_reader_loop, daemon=True, name="HeadingReader").start()
     threading.Thread(target=_control_loop, daemon=True, name="Control").start()

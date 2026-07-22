@@ -8,10 +8,12 @@ Owns:
   - A worker thread that publishes (latest_world_xyz_m, grid_jpeg_bytes) into
     a lock-guarded slot for the backend to consume at its own cadence.
 
-Calibration files live in `<this_dir>/calibration/` by default:
+Calibration files live in `<this_dir>/current_calibration/` by default:
     camera_{1..4}_params_new.json
     cam{2..4}_relative_to_cam1.npz
     cam1_to_world_transform.npz
+(The calibration wizard stages a candidate set in `calibration_staging/` and
+promotes it here on user accept; `reload_calibration()` re-reads the files.)
 
 The raw triangulation + cam1_to_world output is assumed to be in millimetres
 (matching the DISPLAY_IN_METERS=True convention in live_3d_tracker_world.py).
@@ -288,7 +290,7 @@ class Tracker:
         max_blob_area=DEFAULT_MAX_BLOB_AREA,
     ):
         base = os.path.dirname(os.path.abspath(__file__))
-        self.calibration_dir = calibration_dir or os.path.join(base, "calibration")
+        self.calibration_dir = calibration_dir or os.path.join(base, "current_calibration")
         self.camera_indices = camera_indices or list(DEFAULT_CAMERA_INDICES)
         self.cam_width = cam_width
         self.cam_height = cam_height
@@ -340,6 +342,18 @@ class Tracker:
         for c in self._cameras:
             c.stop()
         self._cameras = []
+
+    def reload_calibration(self):
+        """Re-read every calibration file from `calibration_dir`. Call while the
+        tracker is stopped (the calibration wizard stops it for the whole
+        session); swapping matrices mid-loop would mix old/new projections."""
+        self.intrinsics = _load_intrinsics(self.calibration_dir)
+        self.extrinsics = _load_extrinsics(self.calibration_dir)
+        self.projections = [
+            _build_projection(e["R_cam_to_cam1"], e["C_cam1"]) for e in self.extrinsics
+        ]
+        self.world_scale, self.world_R, self.world_t = _load_world_transform(self.calibration_dir)
+        print(f"[tracker] calibration reloaded from {self.calibration_dir}")
 
     def set_camera_indices(self, indices):
         """Swap the USB device indices. If the tracker is running, releases

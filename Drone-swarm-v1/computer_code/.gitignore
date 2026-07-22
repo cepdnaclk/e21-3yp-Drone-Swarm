@@ -13,6 +13,10 @@ dist-ssr
 *.local
 .vite
 
+# Calibration wizard working folders (session images + staged/backup artifacts)
+api/calibration_staging
+api/calibration_backup
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

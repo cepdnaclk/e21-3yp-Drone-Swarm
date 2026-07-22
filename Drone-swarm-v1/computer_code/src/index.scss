@@ -879,6 +879,263 @@ canvas {
   border-radius: 10px;
 }
 
+/* ===== Calibration wizard ===== */
+
+.calib-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1.1rem;
+}
+
+.calib-step {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.95rem 0.45rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #3c3c3a, #2e2e2d);
+  color: var(--text-muted);
+}
+
+.calib-step-index {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  background: #262625;
+  color: var(--text-muted);
+  font-weight: 800;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.calib-step.is-current {
+  border-color: rgba(213, 154, 21, 0.55);
+  background: linear-gradient(180deg, rgba(213, 154, 21, 0.22), rgba(213, 154, 21, 0.08));
+  color: var(--text);
+}
+
+.calib-step.is-current .calib-step-index {
+  background: linear-gradient(180deg, #efb12f, #c88b0b);
+  color: #1e1c18;
+}
+
+.calib-step.is-done {
+  border-color: rgba(123, 179, 71, 0.5);
+  color: var(--text);
+}
+
+.calib-step.is-done .calib-step-index {
+  background: linear-gradient(180deg, #8cc24f, #5e8f2f);
+  color: #16200d;
+}
+
+.calib-step.is-reused {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.calib-step-label {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 0.88rem;
+  line-height: 1.15;
+}
+
+.calib-step-sub {
+  display: block;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.detect-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-muted);
+  background: #2c2c2b;
+}
+
+.detect-badge.is-on {
+  border-color: rgba(123, 179, 71, 0.6);
+  color: #b9e18d;
+  background: rgba(123, 179, 71, 0.12);
+}
+
+.detect-badge.is-off {
+  border-color: rgba(204, 66, 66, 0.5);
+  color: #ffb0b0;
+  background: rgba(204, 66, 66, 0.1);
+}
+
+.calib-cam-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #2f2f2e;
+  color: var(--text-muted);
+  cursor: pointer;
+  min-width: 86px;
+}
+
+.calib-cam-tab.is-active {
+  border-color: rgba(213, 154, 21, 0.6);
+  background: rgba(213, 154, 21, 0.14);
+  color: var(--text);
+}
+
+.calib-cam-tab .cam-count {
+  font-size: 0.72rem;
+}
+
+.calib-log {
+  min-height: 160px;
+  max-height: 300px;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: #1c1c1b;
+  color: var(--text);
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.calib-log-line {
+  padding: 0.1rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.calib-readout {
+  padding: 0.55rem 0.8rem;
+  border-radius: 10px;
+  background: #1c1c1b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+}
+
+.calib-readout.is-live {
+  color: #a3d172;
+}
+
+.calib-readout.is-dead {
+  color: #ff8c8c;
+}
+
+.calib-table {
+  font-size: 0.82rem;
+}
+
+.calib-table td,
+.calib-table th {
+  padding: 0.3rem 0.5rem;
+}
+
+.calib-scene-frame {
+  position: relative;
+  width: 100%;
+  min-height: 420px;
+}
+
+.calib-scene-frame canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.calib-stream {
+  width: 100%;
+  display: block;
+}
+
+.calib-start-option {
+  display: block;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: #2f2f2e;
+  cursor: pointer;
+  margin-bottom: 0.55rem;
+}
+
+.calib-start-option.is-selected {
+  border-color: rgba(213, 154, 21, 0.6);
+  background: rgba(213, 154, 21, 0.1);
+}
+
+.calib-start-option .opt-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.calib-start-option .opt-desc {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 0.15rem;
+}
+
+.calib-warn {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(213, 154, 21, 0.45);
+  border-radius: 10px;
+  background: rgba(213, 154, 21, 0.1);
+  color: #ffd98a;
+  font-size: 0.85rem;
+}
+
+.calib-error {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(204, 66, 66, 0.5);
+  border-radius: 10px;
+  background: rgba(204, 66, 66, 0.12);
+  color: #ffb0b0;
+  font-size: 0.85rem;
+}
+
+.calib-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 1050;
+}
+
+.calib-modal {
+  width: min(480px, 92vw);
+  padding: 1.1rem 1.2rem;
+  border-radius: 12px;
+  border: 1px solid #56534d;
+  background: linear-gradient(180deg, #444442, #393937);
+  box-shadow: var(--shadow);
+}
+
+.calib-table.table > :not(caption) > * > * {
+  background: transparent;
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
 @media (max-width: 991px) {
   .status-strip {
     justify-content: flex-start;

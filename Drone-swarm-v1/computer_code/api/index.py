@@ -35,6 +35,7 @@ from flask import Flask, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
+from calibration_manager import CalibrationManager
 from controller import Controller, ControlParams
 from helpers import Cameras
 from KalmanFilter import KalmanFilter
@@ -335,8 +336,29 @@ def _control_loop():
     last_step_t = time.perf_counter()
     emit_period = 1.0 / EMIT_HZ
     next_emit_t = next_t
+    calib_paused = False
 
     while True:
+        # ---- Calibration mode: halt the whole control pipeline. The wizard
+        # owns the cameras and the drone must stay on the ground, so we stop
+        # stepping the controller and stop writing S-lines to the sender.
+        if calibration.active:
+            if not calib_paused:
+                calib_paused = True
+                controller.cmd_arm(False)
+                with _state_lock:
+                    _emit_state["state"] = "CALIBRATING"
+                    _emit_state["armed"] = 0
+                print("[control] paused for calibration")
+            time.sleep(0.1)
+            next_t = time.perf_counter() + period
+            last_step_t = time.perf_counter()
+            continue
+        if calib_paused:
+            calib_paused = False
+            last_fix_id = -1
+            print("[control] resumed after calibration")
+
         # Pace the loop precisely
         now = time.perf_counter()
         if now < next_t:
@@ -583,6 +605,12 @@ def on_console_command(data):
     command = str(data.get("command", "")).strip().lower()
     args = [str(a) for a in (data.get("args") or [])]
 
+    if calibration.active and command not in ("ping", "estop", "land"):
+        socketio.emit("console-error", {
+            "target": target,
+            "text": "calibration in progress — flight commands are disabled"})
+        return
+
     try:
         entry = _resolve_target(target)
         _retarget_radio(entry["mac"])
@@ -816,12 +844,135 @@ class AlgorithmRunner:
 _algorithm_runner = AlgorithmRunner()
 
 
+# =========================
+# Calibration wizard
+# =========================
+
+def _emit_tracker_poses():
+    """Re-broadcast the tracker's calibration-derived scene data (used after a
+    new calibration set is accepted)."""
+    socketio.emit("camera-pose", {"camera_poses": cameras.camera_poses_in_world()})
+    socketio.emit("to-world-coords-matrix",
+                  {"to_world_coords_matrix": cameras.world_matrix_4x4_metres()})
+
+
+def _calib_camera_indices():
+    with _pid_lock:
+        return list(_camera_indices)
+
+
+def _calib_thresholds():
+    with _pid_lock:
+        return list(_camera_thresholds)
+
+
+calibration = CalibrationManager(
+    base_dir=os.path.dirname(os.path.abspath(__file__)),
+    socketio=socketio,
+    hooks={
+        "stop_tracker": cameras.stop,
+        "start_tracker": cameras.start,
+        "reload_tracker": cameras.reload_calibration,
+        "emit_tracker_poses": _emit_tracker_poses,
+        "get_camera_indices": _calib_camera_indices,
+        "get_thresholds": _calib_thresholds,
+        "get_drone_state": controller.get_state,
+        "algorithm_running": lambda: _algorithm_runner.running(),
+    },
+)
+
+
+@socketio.on("calibration-get-status")
+def on_calibration_get_status(_data=None):
+    return calibration.status()
+
+
+@socketio.on("calibration-start")
+def on_calibration_start(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    # Serialise against the camera-indices reload worker: both sides restart
+    # captures and must not overlap.
+    if not _camera_reload_lock.acquire(blocking=False):
+        return {"ok": False, "error": "a camera reload is in progress — retry shortly"}
+    try:
+        return calibration.start(
+            start_from=str(data.get("start_from", "intrinsics")),
+            checkerboard=data.get("checkerboard", [9, 6]),
+            square_size_mm=data.get("square_size_mm", 23.9),
+        )
+    finally:
+        _camera_reload_lock.release()
+
+
+@socketio.on("calibration-cancel")
+def on_calibration_cancel(_data=None):
+    return calibration.cancel()
+
+
+@socketio.on("calibration-accept")
+def on_calibration_accept(_data=None):
+    return calibration.accept()
+
+
+@socketio.on("calibration-next")
+def on_calibration_next(_data=None):
+    return calibration.next_step()
+
+
+@socketio.on("calibration-restart")
+def on_calibration_restart(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.restart_from(str(data.get("step", "")), data.get("cam"))
+
+
+@socketio.on("calibration-capture")
+def on_calibration_capture(_data=None):
+    return calibration.capture()
+
+
+@socketio.on("calibration-set-active-camera")
+def on_calibration_set_active_camera(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.set_active_camera(data.get("cam"))
+
+
+@socketio.on("calibration-set-thresholds")
+def on_calibration_set_thresholds(data):
+    if not isinstance(data, dict) or not isinstance(data.get("thresholds"), list):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.set_thresholds(data["thresholds"])
+
+
+@socketio.on("calibration-compute")
+def on_calibration_compute(_data=None):
+    return calibration.compute()
+
+
+@socketio.on("calibration-capture-landmark")
+def on_calibration_capture_landmark(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.capture_landmark(data.get("name"), data.get("world"))
+
+
+@socketio.on("calibration-delete-landmark")
+def on_calibration_delete_landmark(data):
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad payload"}
+    return calibration.delete_landmark(str(data.get("name", "")))
+
+
 @socketio.on("algorithm-upload")
 def on_algorithm_upload(data):
     """Receive a .py mission script and start executing it. The return value
     doubles as the socket.io ack payload for the frontend's callback."""
     if not isinstance(data, dict):
         return {"ok": False, "error": "bad payload"}
+    if calibration.active:
+        return {"ok": False, "error": "calibration in progress — finish or cancel it first"}
     filename = str(data.get("filename", "algorithm.py"))
     source = data.get("source")
     if not filename.lower().endswith(".py"):
@@ -849,7 +1000,9 @@ def on_algorithm_stop(_data=None):
 
 @app.route("/api/camera-stream")
 def camera_stream():
-    cameras.start()
+    # During calibration the wizard owns the cameras; don't restart the tracker.
+    if not calibration.active:
+        cameras.start()
 
     def gen():
         boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
@@ -861,6 +1014,27 @@ def camera_stream():
                 time.sleep(max(0.0, next_t - now))
             next_t = time.perf_counter() + target_period
             jpeg = cameras.get_grid_jpeg()
+            if not jpeg:
+                continue
+            yield boundary + jpeg + b"\r\n"
+
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/api/calibration-stream")
+def calibration_stream():
+    """MJPEG live view for the calibration wizard (placeholder frame when no
+    session is running)."""
+    def gen():
+        boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+        target_period = 1.0 / 15.0
+        next_t = time.perf_counter()
+        while True:
+            now = time.perf_counter()
+            if now < next_t:
+                time.sleep(max(0.0, next_t - now))
+            next_t = time.perf_counter() + target_period
+            jpeg = calibration.latest_jpeg()
             if not jpeg:
                 continue
             yield boundary + jpeg + b"\r\n"
@@ -889,6 +1063,7 @@ def on_connect():
                                    "takeoff_z": _takeoff_z,
                                    "setpoint": list(_current_setpoint)})
     socketio.emit("hw-config", _hw_config_payload())
+    socketio.emit("calibration-status", calibration.status())
 
 
 @socketio.on("drone-fleet-update")
@@ -961,6 +1136,10 @@ def on_arm(data):
             armed = bool(data["armed"])
         elif "droneArmed" in data and isinstance(data["droneArmed"], list) and data["droneArmed"]:
             armed = bool(data["droneArmed"][0])
+    if armed and calibration.active:
+        # MoCap re-emits the arm state every 500 ms; drop silently to avoid
+        # spamming errors. The control loop is paused anyway.
+        return
     print(f"[socket] arm-drone -> armed={armed}")
     controller.cmd_arm(armed)
 
@@ -968,6 +1147,11 @@ def on_arm(data):
 @socketio.on("takeoff")
 def on_takeoff(data):
     global _takeoff_z
+    if calibration.active:
+        socketio.emit("console-error", {
+            "target": "all",
+            "text": "calibration in progress — flight commands are disabled"})
+        return
     z = DEFAULT_TAKEOFF_Z
     if isinstance(data, dict) and "z" in data:
         try:
@@ -1108,6 +1292,9 @@ def on_set_camera_indices(data):
         return {"ok": False, "error": "indices must be >= 0"}
     if len(set(indices)) != NUM_CAMERAS:
         return {"ok": False, "error": "indices must be unique"}
+    if calibration.active:
+        return {"ok": False, "error":
+                "calibration in progress — finish or cancel it before changing cameras"}
     if not _camera_reload_lock.acquire(blocking=False):
         return {"ok": False, "error": "a camera reload is already in progress"}
 
@@ -1224,7 +1411,8 @@ def _noop_determine_scale(_): pass
 def on_triangulate_points(_data):
     # Legacy event used to toggle the tracking pipeline. We always track when
     # the camera stream is active, so just make sure cameras are running.
-    cameras.start()
+    if not calibration.active:
+        cameras.start()
 
 
 # =========================

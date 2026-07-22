@@ -27,6 +27,14 @@ class Cameras:
             self.tracker.stop()
             self._started = False
 
+    @property
+    def started(self):
+        return self._started
+
+    def reload_calibration(self):
+        """Re-read calibration files (used after the wizard promotes a new set)."""
+        self.tracker.reload_calibration()
+
     # ---- read API ----
 
     def get_grid_jpeg(self):

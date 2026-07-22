@@ -1,0 +1,3 @@
+# Extra dependencies needed only to PACKAGE the app (not to run it from source).
+# Install with:  pip install -r api/requirements.txt -r api/requirements-build.txt
+pyinstaller>=6.3

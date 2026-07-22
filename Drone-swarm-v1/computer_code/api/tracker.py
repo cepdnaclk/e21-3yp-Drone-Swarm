@@ -20,6 +20,7 @@ backend (Kalman, controller, takeoff target = 0.20 m) works in SI units.
 """
 
 import os
+import sys
 import json
 import time
 import threading
@@ -27,6 +28,27 @@ from itertools import combinations
 
 import cv2 as cv
 import numpy as np
+
+
+def _capture_backend():
+    """Pick the OpenCV capture backend for the current OS.
+    DirectShow on Windows, V4L2 on Linux, and the default backend elsewhere
+    (e.g. AVFoundation on macOS). Override with the CV_CAPTURE_BACKEND env var
+    (one of: dshow, v4l2, msmf, any)."""
+    override = os.environ.get("CV_CAPTURE_BACKEND", "").strip().lower()
+    table = {
+        "dshow": cv.CAP_DSHOW,
+        "v4l2": cv.CAP_V4L2,
+        "msmf": getattr(cv, "CAP_MSMF", cv.CAP_ANY),
+        "any": cv.CAP_ANY,
+    }
+    if override in table:
+        return table[override]
+    if sys.platform.startswith("win"):
+        return cv.CAP_DSHOW
+    if sys.platform.startswith("linux"):
+        return cv.CAP_V4L2
+    return cv.CAP_ANY
 
 
 # =========================
@@ -69,8 +91,15 @@ class ThreadedCamera:
             self.cap.release()
             time.sleep(0.5)
 
-        print(f"[tracker] opening camera {self.src}")
-        self.cap = cv.VideoCapture(self.src, cv.CAP_DSHOW)
+        backend = _capture_backend()
+        print(f"[tracker] opening camera {self.src} (backend {backend})")
+        self.cap = cv.VideoCapture(self.src, backend)
+        if not self.cap.isOpened() and backend != cv.CAP_ANY:
+            # Fall back to OpenCV's default backend if the platform-specific
+            # one refused to open the device.
+            print(f"[tracker] backend {backend} failed for {self.src}, "
+                  f"retrying with default backend")
+            self.cap = cv.VideoCapture(self.src)
 
         self.cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'MJPG'))
         self.cap.set(cv.CAP_PROP_FPS, 15)

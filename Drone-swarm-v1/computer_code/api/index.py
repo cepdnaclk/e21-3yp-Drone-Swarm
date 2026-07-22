@@ -24,8 +24,11 @@ Environment:
 import json
 import os
 import re
+import shutil
+import sys
 import threading
 import time
+import webbrowser
 
 import numpy as np
 import serial
@@ -40,18 +43,106 @@ from LowPassFilter import LowPassFilter
 
 
 # =========================
+# Packaging / path helpers
+# =========================
+
+# True when running from a PyInstaller onefile/onedir bundle.
+FROZEN = getattr(sys, "frozen", False)
+# Directory this script lives in (or the extracted bundle temp dir).
+BUNDLE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+
+def _resource_path(*parts):
+    """Locate a read-only file that ships with the app, both in a normal
+    checkout and inside a PyInstaller bundle. Tries a few candidate roots so
+    the same call works whether data was bundled at the root or under ``api/``."""
+    rel = os.path.join(*parts)
+    roots = [BUNDLE_DIR, os.path.join(BUNDLE_DIR, "api"),
+             os.path.dirname(os.path.abspath(__file__))]
+    for root in roots:
+        candidate = os.path.join(root, rel)
+        if os.path.exists(candidate):
+            return candidate
+    # Fall back to the first candidate even if missing, so callers get a
+    # sensible path to report in errors.
+    return os.path.join(roots[0], rel)
+
+
+def _user_data_dir():
+    """Per-user writable directory for fleet.json, uploads, logs and config.
+    Never write user-modified files inside the installed app directory."""
+    if sys.platform.startswith("win"):
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or \
+            os.path.join(os.path.expanduser("~"), ".config")
+    path = os.path.join(base, "DroneSwarm")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+DATA_DIR = _user_data_dir()
+
+
+def _load_app_config():
+    """Optional user config at ``<DATA_DIR>/config.json``. Lets non-technical
+    users set the serial port / server port without environment variables.
+    Environment variables still win over the file (see resolution below)."""
+    path = os.path.join(DATA_DIR, "config.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[config] failed to read {path}: {e}")
+        return {}
+
+
+_APP_CONFIG = _load_app_config()
+
+
+def _setting(env_key, cfg_key, default):
+    """Resolve a setting: environment variable > config.json > default."""
+    if env_key in os.environ:
+        return os.environ[env_key]
+    if cfg_key in _APP_CONFIG:
+        return _APP_CONFIG[cfg_key]
+    return default
+
+
+# =========================
 # Config
 # =========================
 
-SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM10")
-SERIAL_BAUD = int(os.environ.get("SENDER_SERIAL_BAUD", "115200"))
+# Serial port / baud: env var, then config.json, then platform default.
+_default_port = "COM10" if sys.platform.startswith("win") else "/dev/ttyUSB0"
+SERIAL_PORT = str(_setting("SENDER_SERIAL_PORT", "serial_port", _default_port))
+SERIAL_BAUD = int(_setting("SENDER_SERIAL_BAUD", "serial_baud", 115200))
+
+# Server bind host / port. Default to 127.0.0.1 in production: the backend
+# only serves the local browser UI, so it must not be reachable off-box.
+HOST = str(_setting("DRONESWARM_HOST", "host", "127.0.0.1"))
+PORT = int(_setting("DRONESWARM_PORT", "port", 3001))
 
 CONTROL_HZ = 60.0
 EMIT_HZ = 30.0
 HEADING_LPF_CUTOFF = 8.0
 HEADING_LPF_FS = 50.0       # the drone ESP-NOWs heading at 50 Hz
 
-FLEET_FILE = os.path.join(os.path.dirname(__file__), "fleet.json")
+# fleet.json is user-editable, so it lives in the writable data dir. On first
+# run we seed it from the copy that ships with the app (if present).
+FLEET_FILE = os.path.join(DATA_DIR, "fleet.json")
+if not os.path.exists(FLEET_FILE):
+    _seed = _resource_path("fleet.json")
+    if os.path.exists(_seed):
+        try:
+            shutil.copyfile(_seed, FLEET_FILE)
+        except OSError as e:
+            print(f"[fleet] could not seed {FLEET_FILE}: {e}")
 _MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$")
 
 
@@ -119,7 +210,14 @@ _current_pid = [
 # Globals
 # =========================
 
-app = Flask(__name__)
+# Locate the built React frontend (`npm run build` -> computer_code/dist).
+# In a PyInstaller bundle the dist tree is added at the bundle root.
+if FROZEN:
+    DIST_DIR = os.path.join(BUNDLE_DIR, "dist")
+else:
+    DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dist"))
+
+app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 CORS(app, supports_credentials=True)
 # Force threading mode so socketio.emit() from our plain threading.Thread
 # workers (control / heading / emitter) actually reaches connected clients.
@@ -511,7 +609,7 @@ def on_console_command(data):
 # Algorithm runner
 # =========================
 
-UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
 
 
 class AlgorithmStopped(Exception):
@@ -758,6 +856,20 @@ def on_algorithm_stop(_data=None):
 # Flask routes
 # =========================
 
+@app.route("/")
+def serve_index():
+    """Serve the built React SPA entry point."""
+    return app.send_static_file("index.html")
+
+
+@app.errorhandler(404)
+def spa_fallback(_e):
+    """Client-side routing fallback. Real API/socket routes are matched before
+    this, so any other 404 returns the SPA shell. Missing /api/* paths still
+    return the shell, which is harmless for this local single-page app."""
+    return app.send_static_file("index.html")
+
+
 @app.route("/api/camera-stream")
 def camera_stream():
     cameras.start()
@@ -984,7 +1096,21 @@ def _start_background_threads():
     threading.Thread(target=_emitter_loop, daemon=True, name="Emitter").start()
 
 
+def _maybe_open_browser():
+    """Open the local UI in the user's default browser once the server is up.
+    Only for the packaged desktop app (or when explicitly requested), so it
+    doesn't pop a browser while a developer runs the Vite dev server on :5173."""
+    if not (FROZEN or os.environ.get("DRONESWARM_OPEN_BROWSER") == "1"):
+        return
+    url = f"http://127.0.0.1:{PORT}"
+    print(f"[boot] opening browser at {url}")
+    threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+
+
 if __name__ == "__main__":
+    print(f"[boot] data dir: {DATA_DIR}")
+    print(f"[boot] serving UI from: {DIST_DIR}")
     _start_background_threads()
+    _maybe_open_browser()
     # debug=False -> no Werkzeug reloader (would spawn the threads twice)
-    socketio.run(app, host="0.0.0.0", port=3001, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host=HOST, port=PORT, debug=False, allow_unsafe_werkzeug=True)

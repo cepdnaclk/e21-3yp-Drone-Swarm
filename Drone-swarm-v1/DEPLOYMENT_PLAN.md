@@ -334,3 +334,10 @@ The final user experience should be:
 8. The UI connects to the local backend automatically.
 9. User configures camera and serial settings if needed.
 10. User runs the drone-control system locally.
+
+
+cd Drone-swarm-v1/computer_code
+pip install -r api/requirements.txt -r api/requirements-build.txt
+npm install && npm run build
+pyinstaller api/droneswarm.spec --noconfirm --distpath dist_exe
+./dist_exe/DroneSwarm.exe      # plug in your cameras + ESP32 first

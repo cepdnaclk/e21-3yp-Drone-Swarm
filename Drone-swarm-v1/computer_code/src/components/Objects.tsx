@@ -1,21 +1,22 @@
 import { MutableRefObject, useEffect, useRef } from "react";
-import { ArrowHelper, BufferAttribute, BufferGeometry, Color, EdgesGeometry, InstancedMesh, LineBasicMaterial, Material, Matrix4, NormalBufferAttributes, Object3D, Vector3 } from "three";
+import { BufferGeometry, Color, InstancedMesh, Material, Matrix4, NormalBufferAttributes, Object3D } from "three";
 import { numberToHexColor } from "../shared/styles/scripts/helpers";
 
-export default function Objects({filteredObjectsRef, count}: {filteredObjectsRef: MutableRefObject<Object[]>, count: number}) {
+type TrackedObject = {
+  pos: number[];
+  heading: number;
+  droneIndex: number;
+};
+
+export default function Objects({filteredObjectsRef, count}: {filteredObjectsRef: MutableRefObject<TrackedObject[][]>, count: number}) {
   let objects = filteredObjectsRef.current.flat()
 
-  const instancedMeshRef = useRef<InstancedMesh<BufferGeometry<NormalBufferAttributes>, Material | Material[]>>()
+  const instancedMeshRef = useRef<InstancedMesh<BufferGeometry<NormalBufferAttributes>, Material | Material[]> | null>(null)
   const temp = new Object3D()
   const tempColour = new Color()
 
-  let arrowDefaultDirection = new Vector3
-  arrowDefaultDirection.set(1,0,0)
-
-  let arrowDefaultLocation = new Vector3
-  arrowDefaultLocation.set(0,0,0)
-
   useEffect(() => {
+    if (!instancedMeshRef.current) return
     objects.forEach(({pos, heading, droneIndex}, i) => {
       temp.position.set(pos[0], pos[2], pos[1]) // y is up in threejs
       let threeRotationMatrixY = new Matrix4
@@ -26,9 +27,9 @@ export default function Objects({filteredObjectsRef, count}: {filteredObjectsRef
       temp.setRotationFromMatrix(threeRotationMatrixY)
       temp.updateMatrix()
       instancedMeshRef.current!.setMatrixAt(i, temp.matrix)
-      instancedMeshRef.current!.setColorAt(i, tempColour.set(numberToHexColor(droneIndex, 2))) 
+      instancedMeshRef.current!.setColorAt(i, tempColour.set(numberToHexColor(droneIndex, 2)))
     })
-    instancedMeshRef.current!.instanceMatrix.needsUpdate = true 
+    instancedMeshRef.current.instanceMatrix.needsUpdate = true
   }, [count])
   return (
     <instancedMesh ref={instancedMeshRef} args={[undefined, undefined, objects.length]}>

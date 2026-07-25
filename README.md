@@ -48,3 +48,13 @@ Once you filled this _index.json_ file, please verify the syntax is correct. (Yo
 ### Page Theme
 
 A custom theme integrated with this GitHub Page, which is based on [github.com/cepdnaclk/eYY-project-theme](https://github.com/cepdnaclk/eYY-project-theme). If you like to remove this default theme, you can remove the file, _docs/\_config.yml_ and use HTML based website.
+
+### Test Gate
+
+Run the full local gate before merging or deploying changes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
+```
+
+The gate currently runs Python unit/integration/regression tests under `tests/python` and the `Drone-swarm-v1/computer_code` TypeScript/Vite production build. The same gate is configured in GitHub Actions for every push and pull request.

@@ -7,18 +7,10 @@ import {
   Title,
   Tooltip,
   Legend,
-  CoreChartOptions,
-  DatasetChartOptions,
-  ElementChartOptions,
-  PluginChartOptions,
-  ScaleChartOptions,
-  elements,
-  LineControllerChartOptions,
-  ChartData,
 } from 'chart.js';
-import { MutableRefObject, forwardRef, useEffect, useRef } from 'react';
+import type { ChartData, ChartOptions } from 'chart.js';
+import { MutableRefObject, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
-import { text } from 'stream/consumers';
 // @ts-ignore
 import Controller from 'node-pid-controller'
 
@@ -32,13 +24,20 @@ ChartJS.register(
   Legend
 );
 
-export const options = {
+type TrackedObject = {
+  pos: number[];
+  vel?: number[];
+  heading: number;
+  droneIndex: number;
+};
+
+export const options: ChartOptions<"line"> = {
   animation: false,
   responsive: true,
+  maintainAspectRatio: false,
   spanGaps: true,
   showLine: true,
   plugins: {
-    maintainAspectRatio: false,
     tooltip: {
       enabled: false,
     },
@@ -73,96 +72,96 @@ export const options = {
   }
 };
 
-let dataTemplate: ChartData<"line", number[], number> = {
+let dataTemplate: ChartData<"line", (number | null)[], number> = {
   labels: [] as number[],
   datasets: [
     {
       label: 'X',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(255, 0, 0)',
       backgroundColor: 'rgba(255, 0, 0, 0.5)',
       yAxisID: "A",
     },
     {
       label: 'Y',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(0, 255, 0)',
       backgroundColor: 'rgba(0, 255, 0, 0.5)',
       yAxisID: "A"
     },
     {
       label: 'Z',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(0, 0, 255)',
       backgroundColor: 'rgba(0, 0, 255, 0.5)',
       yAxisID: "A",
     },
     {
       label: 'YAW',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(128, 128, 128)',
       backgroundColor: 'rgba(128, 128, 128, 0.5)',
       yAxisID: "B"
     },
     {
       label: 'X Vel',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(220, 220, 0)',
       backgroundColor: 'rgba(220, 220, 0, 0.5)',
       yAxisID: "C"
     },
     {
       label: 'Y Vel',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(0, 220, 220)',
       backgroundColor: 'rgba(0, 220, 220, 0.5)',
       yAxisID: "C"
     },
     {
       label: 'Z Vel',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(220, 0, 220)',
       backgroundColor: 'rgba(220, 0, 220, 0.5)',
       yAxisID: "C"
     },
     {
       label: 'X Setpoint',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(128, 0, 0)',
       backgroundColor: 'rgba(128, 0, 0, 0.5)',
       yAxisID: "A"
     },
     {
       label: 'Y Setpoint',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(0, 128, 0)',
       backgroundColor: 'rgba(0, 128, 0, 0.5)',
       yAxisID: "A",
     },
     {
       label: 'Z Setpoint',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(0, 0, 128)',
       backgroundColor: 'rgba(0, 0, 128, 0.5)',
       yAxisID: "A"
     },
     {
       label: 'X Vel Setpoint',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(128, 128, 0)',
       backgroundColor: 'rgba(128, 128, 0, 0.5)',
       yAxisID: "C"
     },
     {
       label: 'Y Vel Setpoint',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(0, 128, 128)',
       backgroundColor: 'rgba(0, 128, 128, 0.5)',
       yAxisID: "C"
     },
     {
       label: 'Z Vel Setpoint',
-      data: [] as number[],
+      data: [] as (number | null)[],
       borderColor: 'rgb(128, 0, 128)',
       backgroundColor: 'rgba(128, 0, 128, 0.5)',
       yAxisID: "C"
@@ -177,58 +176,60 @@ let yPosPID = new Controller();
 let zPosPID = new Controller();
 
 export default function Chart({filteredObjectsRef, droneSetpointHistoryRef, objectPointCount, dronePID, droneArmed, currentDroneIndex}: 
-  {filteredObjectsRef: MutableRefObject<object>, droneSetpointHistoryRef: MutableRefObject<number[][]>, objectPointCount: number, dronePID: number[], droneArmed: boolean[], currentDroneIndex: number}) {
-  let chartRef = useRef<ChartJS<"line", number[], number> | null>(null);
+  {filteredObjectsRef: MutableRefObject<TrackedObject[][]>, droneSetpointHistoryRef: MutableRefObject<number[][]>, objectPointCount: number, dronePID: number[], droneArmed: boolean[], currentDroneIndex: number}) {
+  let chartRef = useRef<ChartJS<"line", (number | null)[], number> | null>(null);
 
   useEffect(() => {
     console.log(filteredObjectsRef.current)
     let sliced = filteredObjectsRef.current.length <= 15 ? [] : filteredObjectsRef.current.slice(15)
     const length = sliced.length
+    const labels = data.labels as number[]
     if (length === 0) {
       data = structuredClone(dataTemplate)
     }
-    else if (length !== data.labels![data.labels!.length - 1]) {
-      data.labels.push(length)
-      const lastFilteredPoint = sliced[length-1].filter(x => x.droneIndex === currentDroneIndex)[0]
+    else if (length !== labels[labels.length - 1]) {
+      labels.push(length)
+      const lastFilteredPoint = sliced[length-1].filter((x: TrackedObject) => x.droneIndex === currentDroneIndex)[0]
+      const setpoint = droneSetpointHistoryRef.current[length - 1] ?? []
   
       if (lastFilteredPoint !== undefined) {
         console.log(lastFilteredPoint)
-        data.datasets[0].data.push(lastFilteredPoint["pos"][0])
-        data.datasets[1].data.push(lastFilteredPoint["pos"][1])
-        data.datasets[2].data.push(lastFilteredPoint["pos"][2])
+        data.datasets[0].data.push(lastFilteredPoint.pos[0] ?? null)
+        data.datasets[1].data.push(lastFilteredPoint.pos[1] ?? null)
+        data.datasets[2].data.push(lastFilteredPoint.pos[2] ?? null)
     
-        data.datasets[3].data.push(lastFilteredPoint["heading"])
+        data.datasets[3].data.push(lastFilteredPoint.heading)
         
-        if (lastFilteredPoint["vel"]) {
-          data.datasets[4].data.push(lastFilteredPoint["vel"][0])
-          data.datasets[5].data.push(lastFilteredPoint["vel"][1])
-          data.datasets[6].data.push(lastFilteredPoint["vel"][2])
+        if (lastFilteredPoint.vel) {
+          data.datasets[4].data.push(lastFilteredPoint.vel[0] ?? null)
+          data.datasets[5].data.push(lastFilteredPoint.vel[1] ?? null)
+          data.datasets[6].data.push(lastFilteredPoint.vel[2] ?? null)
         }
         else {
-          data.datasets[4].data.push(undefined)
-          data.datasets[5].data.push(undefined)
-          data.datasets[6].data.push(undefined)
+          data.datasets[4].data.push(null)
+          data.datasets[5].data.push(null)
+          data.datasets[6].data.push(null)
         }
         
-        data.datasets[7].data.push(droneSetpointHistoryRef.current[length-1][0])
-        data.datasets[8].data.push(droneSetpointHistoryRef.current[length-1][1])
-        data.datasets[9].data.push(droneSetpointHistoryRef.current[length-1][2])
+        data.datasets[7].data.push(setpoint[0] ?? null)
+        data.datasets[8].data.push(setpoint[1] ?? null)
+        data.datasets[9].data.push(setpoint[2] ?? null)
     
-        if (droneSetpointHistoryRef.current[length-1].length != 0) {
-          xPosPID.setTarget(droneSetpointHistoryRef.current[length-1][0])
-          yPosPID.setTarget(droneSetpointHistoryRef.current[length-1][1])
-          zPosPID.setTarget(droneSetpointHistoryRef.current[length-1][2])
+        if (setpoint.length !== 0) {
+          xPosPID.setTarget(setpoint[0])
+          yPosPID.setTarget(setpoint[1])
+          zPosPID.setTarget(setpoint[2])
         }
         
-        if (lastFilteredPoint["pos"].length != 0) {
-          data.datasets[10].data.push(xPosPID.update(lastFilteredPoint["pos"][0]))
-          data.datasets[11].data.push(yPosPID.update(lastFilteredPoint["pos"][1]))
-          data.datasets[12].data.push(zPosPID.update(lastFilteredPoint["pos"][2]))
+        if (lastFilteredPoint.pos.length !== 0) {
+          data.datasets[10].data.push(xPosPID.update(lastFilteredPoint.pos[0]))
+          data.datasets[11].data.push(yPosPID.update(lastFilteredPoint.pos[1]))
+          data.datasets[12].data.push(zPosPID.update(lastFilteredPoint.pos[2]))
         }
         else {
-          data.datasets[10].data.push(undefined)
-          data.datasets[11].data.push(undefined)
-          data.datasets[12].data.push(undefined)
+          data.datasets[10].data.push(null)
+          data.datasets[11].data.push(null)
+          data.datasets[12].data.push(null)
         }
       }
     }

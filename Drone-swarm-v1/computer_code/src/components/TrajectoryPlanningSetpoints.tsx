@@ -1,13 +1,13 @@
-import { max, multiply } from "mathjs";
-import { MutableRefObject, useEffect, useRef } from "react";
-import { Color, InstancedMesh, Matrix4, Object3D } from "three";
+import { useEffect, useRef } from "react";
+import { Color, InstancedMesh, Object3D } from "three";
 
 export default function TrajectoryPlanningSetpoints({ trajectoryPlanningSetpoints, NUM_DRONES }: { trajectoryPlanningSetpoints: number[][], NUM_DRONES: number }) {
-  const instancedMeshRef = useRef<InstancedMesh>()
+  const instancedMeshRef = useRef<InstancedMesh | null>(null)
   const temp = new Object3D()
   const tempColour = new Color()
 
   useEffect(() => {
+    if (!instancedMeshRef.current) return
     for (let droneIndex = 0; droneIndex < NUM_DRONES; droneIndex++) {
       trajectoryPlanningSetpoints.map(x => x.slice(droneIndex * 3, (droneIndex + 1) * 3)).forEach(([x, y, z]: Array<number>, i) => {
         temp.position.set(x, z, y) // y is up in threejs
@@ -17,7 +17,7 @@ export default function TrajectoryPlanningSetpoints({ trajectoryPlanningSetpoint
       })
     }
 
-    instancedMeshRef.current!.instanceMatrix.needsUpdate = true
+    instancedMeshRef.current.instanceMatrix.needsUpdate = true
   }, [trajectoryPlanningSetpoints])
 
   return (

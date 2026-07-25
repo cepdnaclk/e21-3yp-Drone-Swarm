@@ -22,6 +22,7 @@ Environment:
     SENDER_SERIAL_BAUD   default 115200
 """
 
+import ast
 import json
 import os
 import re
@@ -49,6 +50,7 @@ from tracker import DEFAULT_CAMERA_INDICES
 
 SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM13")
 SERIAL_BAUD = int(os.environ.get("SENDER_SERIAL_BAUD", "115200"))
+BACKEND_HOST = os.environ.get("DRONE_BACKEND_HOST", "127.0.0.1")
 
 CONTROL_HZ = 60.0
 EMIT_HZ = 30.0
@@ -631,6 +633,71 @@ def on_console_command(data):
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 
 
+class AlgorithmValidationError(ValueError):
+    pass
+
+
+class AlgorithmSourceValidator(ast.NodeVisitor):
+    """Allow only a small mission-command subset of Python."""
+
+    def __init__(self, allowed_calls):
+        self.allowed_calls = set(allowed_calls)
+
+    def validate(self, source: str):
+        try:
+            tree = ast.parse(source, mode="exec")
+        except SyntaxError as e:
+            raise AlgorithmValidationError(f"syntax error: line {e.lineno}: {e.msg}")
+        self.visit(tree)
+        return tree
+
+    def generic_visit(self, node):
+        raise AlgorithmValidationError(
+            f"{type(node).__name__} is not allowed in uploaded algorithms"
+        )
+
+    def visit_Module(self, node):
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_Expr(self, node):
+        self.visit(node.value)
+
+    def visit_Call(self, node):
+        if not isinstance(node.func, ast.Name):
+            raise AlgorithmValidationError("only direct mission API calls are allowed")
+        if node.func.id not in self.allowed_calls:
+            raise AlgorithmValidationError(f"function '{node.func.id}' is not allowed")
+        for arg in node.args:
+            self.visit(arg)
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                raise AlgorithmValidationError("**kwargs are not allowed")
+            self.visit(keyword.value)
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.allowed_calls:
+            return
+        raise AlgorithmValidationError(f"name '{node.id}' is not allowed")
+
+    def visit_Constant(self, node):
+        if isinstance(node.value, (str, int, float, bool)) or node.value is None:
+            return
+        raise AlgorithmValidationError("only strings, numbers, booleans and null are allowed")
+
+    def visit_List(self, node):
+        for element in node.elts:
+            self.visit(element)
+
+    def visit_Tuple(self, node):
+        for element in node.elts:
+            self.visit(element)
+
+
+def validate_algorithm_source(source: str, allowed_calls):
+    return AlgorithmSourceValidator(allowed_calls).validate(source)
+
+
 class AlgorithmStopped(Exception):
     """Raised inside user scripts when the UI requests a stop."""
 
@@ -660,9 +727,11 @@ class AlgorithmRunner:
             if self.running():
                 raise ValueError("an algorithm is already running — stop it first")
             try:
-                code = compile(source, filename, "exec")
-            except SyntaxError as e:
-                raise ValueError(f"syntax error: line {e.lineno}: {e.msg}")
+                api = self._build_api()
+                tree = validate_algorithm_source(source, api.keys())
+                code = compile(tree, filename, "exec")
+            except AlgorithmValidationError as e:
+                raise ValueError(str(e))
 
             os.makedirs(UPLOADS_DIR, exist_ok=True)
             safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename) or "algorithm.py"
@@ -677,7 +746,7 @@ class AlgorithmRunner:
             self._telemetry_callbacks = []
             self.filename = filename
             self._thread = threading.Thread(
-                target=self._run, args=(code,), daemon=True, name="Algorithm")
+                target=self._run, args=(code, api), daemon=True, name="Algorithm")
             self._thread.start()
             return path
 
@@ -812,15 +881,14 @@ class AlgorithmRunner:
             "wait": wait,
             "get_position": get_position, "get_battery": get_battery,
             "list_active": list_active, "get_state": get_state,
-            "on_telemetry": on_telemetry,
             "log": log, "print": log,
         }
 
-    def _run(self, code):
+    def _run(self, code, api):
         self._status("running")
         self._log(f"--- {self.filename} started ---", stream="sys")
         try:
-            exec(code, {"__name__": "__main__", **self._build_api()})
+            exec(code, {"__name__": "__main__", "__builtins__": {}, **api})
             self._log(f"--- {self.filename} finished ---", stream="sys")
             self._status("finished")
         except AlgorithmStopped:
@@ -1454,4 +1522,4 @@ def _start_background_threads():
 if __name__ == "__main__":
     _start_background_threads()
     # debug=False -> no Werkzeug reloader (would spawn the threads twice)
-    socketio.run(app, host="0.0.0.0", port=3001, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host=BACKEND_HOST, port=3001, debug=False, allow_unsafe_werkzeug=True)

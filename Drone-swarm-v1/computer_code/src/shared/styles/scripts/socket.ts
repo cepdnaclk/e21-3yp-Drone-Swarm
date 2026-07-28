@@ -1,3 +1,5 @@
 import { io } from 'socket.io-client';
 
-export const socket = io("http://localhost:3001");
+import { API_BASE_URL } from "../../../config";
+
+export const socket = io(API_BASE_URL);

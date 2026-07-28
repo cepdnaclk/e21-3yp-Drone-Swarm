@@ -58,3 +58,10 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
 The gate currently runs Python unit/integration/regression tests under `tests/python` and the `Drone-swarm-v1/computer_code` TypeScript/Vite production build. The same gate is configured in GitHub Actions for every push and pull request.
+
+### Desktop Distribution
+
+The control application is packaged as a local Windows or Ubuntu executable;
+AWS only hosts the downloadable release artifacts. See
+[`Drone-swarm-v1/computer_code/DEPLOYMENT.md`](Drone-swarm-v1/computer_code/DEPLOYMENT.md)
+for local build commands, runtime data locations, and GitHub Actions/AWS setup.

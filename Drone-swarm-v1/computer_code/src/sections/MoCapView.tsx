@@ -7,6 +7,7 @@ import { OrbitControls, Stats } from "@react-three/drei";
 
 import CameraWireframe from "../components/CameraWireframe";
 import PidErrorChart from "../components/PidErrorChart";
+import { backendUrl } from "../config";
 import { socket } from "../shared/styles/scripts/socket";
 
 type FleetEntry = {
@@ -368,7 +369,7 @@ export default function MoCapView() {
                 <Col>
                   {cameraStreamRunning ? (
                     <img
-                      src="http://localhost:3001/api/camera-stream"
+                      src={backendUrl("/api/camera-stream")}
                       className="camera-frame"
                       alt="camera stream"
                     />

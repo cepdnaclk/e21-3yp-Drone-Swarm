@@ -1,0 +1,11 @@
+.venv/
+**/venv/
+**/node_modules/
+**/dist/
+**/dist_exe/
+**/build/
+**/release/
+**/__pycache__/
+*.py[cod]
+.env
+.env.local

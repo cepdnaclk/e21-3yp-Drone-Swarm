@@ -23,12 +23,15 @@ backend (Kalman, controller, takeoff target = 0.20 m) works in SI units.
 
 import os
 import json
+import platform
 import time
 import threading
 from itertools import combinations
 
 import cv2 as cv
 import numpy as np
+
+from runtime_paths import ensure_runtime_data
 
 
 # =========================
@@ -72,7 +75,7 @@ class ThreadedCamera:
             time.sleep(0.5)
 
         print(f"[tracker] opening camera {self.src}")
-        self.cap = cv.VideoCapture(self.src, cv.CAP_DSHOW)
+        self.cap = self._create_capture()
 
         self.cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'MJPG'))
         self.cap.set(cv.CAP_PROP_FPS, 15)
@@ -93,6 +96,53 @@ class ThreadedCamera:
 
         print(f"[tracker] camera {self.src} reopen status: {ret}")
         return ret
+
+    def _create_capture(self):
+        """Open a camera with the native backend, then OpenCV's fallback."""
+        requested = os.environ.get("DRONE_CAMERA_BACKEND", "").strip().lower()
+        if requested:
+            backend_names = {
+                "dshow": getattr(cv, "CAP_DSHOW", None),
+                "v4l2": getattr(cv, "CAP_V4L2", None),
+                "default": None,
+                "any": None,
+            }
+            if requested not in backend_names:
+                print(
+                    "[tracker] WARNING: DRONE_CAMERA_BACKEND must be "
+                    "'dshow', 'v4l2', or 'default'; using platform default"
+                )
+                requested = ""
+            else:
+                candidates = [(requested, backend_names[requested])]
+
+        if not requested:
+            system = platform.system()
+            if system == "Windows":
+                candidates = [("DirectShow", getattr(cv, "CAP_DSHOW", None))]
+            elif system == "Linux":
+                candidates = [("V4L2", getattr(cv, "CAP_V4L2", None))]
+            else:
+                candidates = []
+            candidates.append(("OpenCV default", None))
+
+        last_capture = None
+        for name, backend in candidates:
+            capture = (
+                cv.VideoCapture(self.src)
+                if backend is None
+                else cv.VideoCapture(self.src, backend)
+            )
+            if capture.isOpened():
+                print(f"[tracker] camera {self.src} using {name}")
+                return capture
+            capture.release()
+            last_capture = capture
+            print(f"[tracker] camera {self.src} could not open with {name}")
+
+        # Return a valid VideoCapture object so the existing reopen loop can
+        # retry when a camera is connected later.
+        return last_capture or cv.VideoCapture()
 
     def _update(self):
         while self.running:
@@ -289,8 +339,8 @@ class Tracker:
         min_blob_area=DEFAULT_MIN_BLOB_AREA,
         max_blob_area=DEFAULT_MAX_BLOB_AREA,
     ):
-        base = os.path.dirname(os.path.abspath(__file__))
-        self.calibration_dir = calibration_dir or os.path.join(base, "current_calibration")
+        runtime_paths = ensure_runtime_data()
+        self.calibration_dir = calibration_dir or str(runtime_paths.calibration_dir)
         self.camera_indices = camera_indices or list(DEFAULT_CAMERA_INDICES)
         self.cam_width = cam_width
         self.cam_height = cam_height

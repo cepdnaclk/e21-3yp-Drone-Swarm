@@ -20,21 +20,30 @@ Environment:
     SENDER_SERIAL_PORT   default 'COM13' on Windows; a "serial_port" saved in
                          settings.json (Camera Settings page) takes precedence
     SENDER_SERIAL_BAUD   default 115200
+    DRONE_BACKEND_PORT   default 3001
+    DRONE_OPEN_BROWSER   default true; set to 0/false/no to disable
+    DRONE_SWARM_DATA_DIR optional writable-data directory override
 """
 
 import ast
 import json
 import os
 import re
+import socket
 import threading
 import time
+import webbrowser
 
 import numpy as np
 import serial
 from serial.tools import list_ports
-from flask import Flask, Response
+from flask import Flask, Response, request
 from flask_cors import CORS
 from flask_socketio import SocketIO
+
+from runtime_paths import ensure_runtime_data
+
+RUNTIME_PATHS = ensure_runtime_data()
 
 from calibration_manager import CalibrationManager
 from controller import Controller, ControlParams
@@ -48,16 +57,22 @@ from tracker import DEFAULT_CAMERA_INDICES
 # Config
 # =========================
 
-SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", "COM13")
+DEFAULT_SERIAL_PORT = "COM13" if os.name == "nt" else "/dev/ttyUSB0"
+SERIAL_PORT = os.environ.get("SENDER_SERIAL_PORT", DEFAULT_SERIAL_PORT)
 SERIAL_BAUD = int(os.environ.get("SENDER_SERIAL_BAUD", "115200"))
 BACKEND_HOST = os.environ.get("DRONE_BACKEND_HOST", "127.0.0.1")
+BACKEND_PORT = int(os.environ.get("DRONE_BACKEND_PORT", "3001"))
+if not 1 <= BACKEND_PORT <= 65535:
+    raise ValueError("DRONE_BACKEND_PORT must be between 1 and 65535")
+OPEN_BROWSER = os.environ.get("DRONE_OPEN_BROWSER", "true").strip().lower() \
+    not in {"0", "false", "no"}
 
 CONTROL_HZ = 60.0
 EMIT_HZ = 30.0
 HEADING_LPF_CUTOFF = 8.0
 HEADING_LPF_FS = 50.0       # the drone ESP-NOWs heading at 50 Hz
 
-FLEET_FILE = os.path.join(os.path.dirname(__file__), "fleet.json")
+FLEET_FILE = str(RUNTIME_PATHS.fleet_file)
 _MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$")
 
 
@@ -112,7 +127,7 @@ _battery = {}
 # altitude and setpoint. Loaded from settings.json at boot and written back
 # when the UI clicks "Save settings". The console's "pid <index> <value>"
 # command edits one slot of the gains and re-sends the full set.
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+SETTINGS_FILE = str(RUNTIME_PATHS.settings_file)
 NUM_PID = 17
 NUM_CAMERAS = 4
 DEFAULT_THRESHOLD = 180
@@ -211,7 +226,11 @@ def _write_settings():
 # Globals
 # =========================
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder=str(RUNTIME_PATHS.frontend_dist_dir),
+    static_url_path="",
+)
 CORS(app, supports_credentials=True)
 # Force threading mode so socketio.emit() from our plain threading.Thread
 # workers (control / heading / emitter) actually reaches connected clients.
@@ -630,7 +649,7 @@ def on_console_command(data):
 # Algorithm runner
 # =========================
 
-UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+UPLOADS_DIR = str(RUNTIME_PATHS.uploads_dir)
 
 
 class AlgorithmValidationError(ValueError):
@@ -935,7 +954,7 @@ def _calib_thresholds():
 
 
 calibration = CalibrationManager(
-    base_dir=os.path.dirname(os.path.abspath(__file__)),
+    base_dir=str(RUNTIME_PATHS.data_dir),
     socketio=socketio,
     hooks={
         "stop_tracker": cameras.stop,
@@ -1065,6 +1084,38 @@ def on_algorithm_stop(_data=None):
 # =========================
 # Flask routes
 # =========================
+
+@app.route("/")
+def serve_index():
+    index_file = RUNTIME_PATHS.frontend_dist_dir / "index.html"
+    if not index_file.is_file():
+        return Response(
+            "Drone Swarm frontend is not built. Run `npm run build` from "
+            "computer_code and restart the backend.",
+            status=503,
+            mimetype="text/plain",
+        )
+    return app.send_static_file("index.html")
+
+
+@app.route("/api/health")
+def health():
+    return {
+        "ok": True,
+        "data_dir": str(RUNTIME_PATHS.data_dir),
+    }
+
+
+@app.errorhandler(404)
+def spa_fallback(error):
+    # API and Socket.IO callers must receive a real 404 instead of HTML.
+    if request.path.startswith(("/api/", "/socket.io/")):
+        return {"ok": False, "error": "not found"}, 404
+    index_file = RUNTIME_PATHS.frontend_dist_dir / "index.html"
+    if not index_file.is_file():
+        return error
+    return app.send_static_file("index.html")
+
 
 @app.route("/api/camera-stream")
 def camera_stream():
@@ -1519,7 +1570,39 @@ def _start_background_threads():
     threading.Thread(target=_emitter_loop, daemon=True, name="Emitter").start()
 
 
+def _open_browser_when_ready():
+    """Wait for the local listener before opening the user's browser."""
+    connect_host = (
+        "127.0.0.1"
+        if BACKEND_HOST in {"0.0.0.0", "::"}
+        else BACKEND_HOST
+    )
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((connect_host, BACKEND_PORT), timeout=0.5):
+                webbrowser.open(f"http://{connect_host}:{BACKEND_PORT}")
+                return
+        except OSError:
+            time.sleep(0.2)
+    print("[boot] WARNING: local server was not ready; browser was not opened")
+
+
 if __name__ == "__main__":
     _start_background_threads()
+    if OPEN_BROWSER:
+        threading.Thread(
+            target=_open_browser_when_ready,
+            daemon=True,
+            name="BrowserLauncher",
+        ).start()
     # debug=False -> no Werkzeug reloader (would spawn the threads twice)
-    socketio.run(app, host=BACKEND_HOST, port=3001, debug=False, allow_unsafe_werkzeug=True)
+    print(f"[boot] UI: http://127.0.0.1:{BACKEND_PORT}")
+    print(f"[boot] writable data: {RUNTIME_PATHS.data_dir}")
+    socketio.run(
+        app,
+        host=BACKEND_HOST,
+        port=BACKEND_PORT,
+        debug=False,
+        allow_unsafe_werkzeug=True,
+    )

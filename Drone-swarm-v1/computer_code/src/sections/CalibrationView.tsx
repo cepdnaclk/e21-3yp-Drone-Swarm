@@ -11,6 +11,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 
 import CameraWireframe from "../components/CameraWireframe";
+import { backendUrl } from "../config";
 import { socket } from "../shared/styles/scripts/socket";
 
 type StepId = "intrinsics" | "extrinsics" | "landmarks" | "verify";
@@ -123,7 +124,7 @@ const STEP_META: Record<StepId, { title: string; short: string }> = {
   verify: { title: "Verify", short: "Test & accept" },
 };
 
-const STREAM_URL = "http://localhost:3001/api/calibration-stream";
+const STREAM_URL = backendUrl("/api/calibration-stream");
 
 const fmt = (x: number | null | undefined, digits = 1) =>
   x === null || x === undefined || Number.isNaN(x) ? "-" : x.toFixed(digits);

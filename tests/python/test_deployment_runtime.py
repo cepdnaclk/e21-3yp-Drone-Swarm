@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 API_DIR = REPO_ROOT / "Drone-swarm-v1" / "computer_code" / "api"
 FRONTEND_DIR = REPO_ROOT / "Drone-swarm-v1" / "computer_code" / "src"
 PYINSTALLER_SPEC = API_DIR / "droneswarm.spec"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -58,6 +59,14 @@ class DeploymentRuntimeTests(unittest.TestCase):
     def test_pyinstaller_includes_scipy_dynamic_resource_dependency(self):
         spec = PYINSTALLER_SPEC.read_text(encoding="utf-8")
         self.assertIn('collect_submodules("importlib.resources")', spec)
+
+    def test_release_archive_check_uses_python_module_entrypoint(self):
+        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "python -m PyInstaller.utils.cliutils.archive_viewer",
+            workflow,
+        )
+        self.assertNotIn("pyi-archive-viewer", workflow)
 
 
 if __name__ == "__main__":

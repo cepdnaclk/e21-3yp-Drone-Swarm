@@ -70,7 +70,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $listing = (& pyi-archive-viewer.exe -r -l dist_exe/DroneSwarm.exe) | Out-String
+          $listing = (& python -m PyInstaller.utils.cliutils.archive_viewer `
+            -r -l dist_exe/DroneSwarm.exe) | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect the PyInstaller archive"
+          }
           if ($listing -notmatch "importlib\.resources") {
             throw "PyInstaller omitted importlib.resources"
           }
@@ -79,7 +83,8 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          pyi-archive-viewer -r -l dist_exe/DroneSwarm > archive-contents.txt
+          python -m PyInstaller.utils.cliutils.archive_viewer \
+            -r -l dist_exe/DroneSwarm > archive-contents.txt
           grep -q "importlib.resources" archive-contents.txt
 
       - name: Name Windows release

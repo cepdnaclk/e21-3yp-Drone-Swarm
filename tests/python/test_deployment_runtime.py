@@ -8,6 +8,7 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 API_DIR = REPO_ROOT / "Drone-swarm-v1" / "computer_code" / "api"
 FRONTEND_DIR = REPO_ROOT / "Drone-swarm-v1" / "computer_code" / "src"
+PYINSTALLER_SPEC = API_DIR / "droneswarm.spec"
 
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -53,6 +54,10 @@ class DeploymentRuntimeTests(unittest.TestCase):
         self.assertNotIn("http://localhost:3001", source)
         self.assertNotIn("http://127.0.0.1:3001", source)
         self.assertIn("window.location.origin", source)
+
+    def test_pyinstaller_includes_scipy_dynamic_resource_dependency(self):
+        spec = PYINSTALLER_SPEC.read_text(encoding="utf-8")
+        self.assertIn('collect_submodules("importlib.resources")', spec)
 
 
 if __name__ == "__main__":

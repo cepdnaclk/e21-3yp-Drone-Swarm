@@ -24,7 +24,11 @@ datas = [
 ] + cv2_datas
 
 hiddenimports = sorted(set(
-    cv2_hiddenimports
+    ["importlib.resources"]
+    + cv2_hiddenimports
+    # scipy.stats._sobol imports importlib.resources dynamically from a
+    # compiled extension, so PyInstaller cannot discover it by AST analysis.
+    + collect_submodules("importlib.resources")
     + collect_submodules("engineio.async_drivers")
     + collect_submodules("serial.tools")
 ))

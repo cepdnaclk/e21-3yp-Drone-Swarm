@@ -66,6 +66,22 @@ jobs:
           --distpath dist_exe
           --workpath build/pyinstaller
 
+      - name: Verify Windows bundled imports
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $listing = (& pyi-archive-viewer.exe -r -l dist_exe/DroneSwarm.exe) | Out-String
+          if ($listing -notmatch "importlib\.resources") {
+            throw "PyInstaller omitted importlib.resources"
+          }
+
+      - name: Verify Ubuntu bundled imports
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          pyi-archive-viewer -r -l dist_exe/DroneSwarm > archive-contents.txt
+          grep -q "importlib.resources" archive-contents.txt
+
       - name: Name Windows release
         if: runner.os == 'Windows'
         shell: pwsh

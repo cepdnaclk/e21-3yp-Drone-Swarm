@@ -59,6 +59,11 @@ int selectedReceiver = 0;
 #define ESPNOW_CHANNEL 1
 #define SEND_PERIOD_MS 20   // 50 Hz state stream
 #define DEBUG_CMD_PRINT 0
+
+// Bump whenever StatePacket's layout or field meanings change, and reflash
+// EVERY board. Receivers reject mismatched packets and log why, so a board
+// left on an old build announces itself instead of going silently deaf.
+#define STATE_PROTO_VER 2
 // =================================================
 
 // Tagged ESP-NOW packet. msg_type selects which fields the receiver applies.
@@ -74,8 +79,10 @@ typedef struct __attribute__((packed)) {
   //   [12..14] z vel kp/ki/kd       [15] groundEffectCoef [16] groundEffectOffset
   float    pid[17];
   int16_t  trim_t, trim_r, trim_p, trim_y;
-  uint8_t  armed;                // 0 or 1
+  uint8_t  armed;                // 0=disarmed, 1=armed & parked, 2=armed & flying (targeted drone)
+  uint8_t  fleet_armed;          // 1 = EVERY drone holds motors armed but parked
   uint8_t  msg_type;             // 0=state, 2=pid_gains, 3=trim
+  uint8_t  proto_ver;            // STATE_PROTO_VER; receivers reject anything else
   uint8_t  target[6];            // selected drone's STA MAC; only that drone acts on this packet
   uint32_t seq;
 } StatePacket;
@@ -158,11 +165,12 @@ static bool parseInts(const String &line, int start, long *out, int n) {
   return true;
 }
 
-// "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed\n" -> populate latestState (msg_type=0).
-// 11 fields: 10 floats + armed (parsed as float, rounded).
+// "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed,fleet_armed\n" -> populate
+// latestState (msg_type=0). 12 fields: 10 floats + armed + fleet_armed, the
+// last two parsed as floats and rounded.
 static void parseStateLine(const String &line) {
-  float f[11];
-  if (!parseFloats(line, 2, f, 11)) return;
+  float f[12];
+  if (!parseFloats(line, 2, f, 12)) return;
 
   latestState.x      = f[0];
   latestState.y      = f[1];
@@ -179,7 +187,9 @@ static void parseStateLine(const String &line) {
   if (armv < 0) armv = 0;
   if (armv > 2) armv = 2;
   latestState.armed = (uint8_t)armv;
+  latestState.fleet_armed = (f[11] >= 0.5f) ? 1 : 0;
   latestState.msg_type = 0;
+  latestState.proto_ver = STATE_PROTO_VER;
 
 #if DEBUG_CMD_PRINT
   Serial.printf("S pos=%.3f,%.3f,%.3f vel=%.3f,%.3f,%.3f yaw_sp=%.3f sp=%.3f,%.3f,%.3f arm=%u\n",
@@ -348,9 +358,15 @@ void setup() {
     return;
   }
 
-  // Safe defaults until the PC sends real state.
+  // Safe defaults until the PC sends real state. proto_ver is set here (not
+  // only in parseStateLine) so P/T packets sent before the first S-line still
+  // carry a valid version.
   latestState.armed = 0;
+  latestState.fleet_armed = 0;
   latestState.msg_type = 0;
+  latestState.proto_ver = STATE_PROTO_VER;
+  Serial.printf("[sender] StatePacket v%d, %u bytes\n",
+                STATE_PROTO_VER, (unsigned)sizeof(StatePacket));
   memcpy(latestState.target, receiverAddress, 6);  // default selection = receiver_1
 
   Serial.println("Transmitter ready: Python Serial -> ESP-NOW; ESP-NOW -> H<yaw>");

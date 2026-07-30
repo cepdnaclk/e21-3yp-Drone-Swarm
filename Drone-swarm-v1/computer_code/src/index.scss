@@ -323,7 +323,9 @@ body {
 
 .console-line {
   display: grid;
-  grid-template-columns: 4.2rem auto 1rem 1fr;
+  // Fixed target column so a fan-out reply across several drones stays
+  // aligned instead of stepping in and out with each name's length.
+  grid-template-columns: 4.2rem 7rem 1rem 1fr;
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.18rem 0;
@@ -335,7 +337,10 @@ body {
 }
 
 .console-target {
+  overflow: hidden;
   color: var(--accent-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .console-arrow {
@@ -383,10 +388,23 @@ body {
 }
 
 .command-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--accent-soft);
+}
+
+.command-tag {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid rgba(123, 179, 71, 0.45);
+  border-radius: 999px;
+  color: #7bb347;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
 }
 
 .command-format {

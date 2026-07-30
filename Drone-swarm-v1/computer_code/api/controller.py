@@ -7,11 +7,18 @@ PID stack now lives on the drone-side ESP32-C3. This module turns
 dict that the sender ESP32 forwards to the drone as a StatePacket.
 
 Serial protocol the sender ESP32 expects:
-    PC -> ESP : "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed\n"
-                ints/floats, all metric. armed is 0 or 1.
+    PC -> ESP : "S,x,y,z,vx,vy,vz,yaw_sp,x_sp,y_sp,z_sp,armed,fleet_armed\n"
+                ints/floats, all metric. armed is 0..2, fleet_armed is 0 or 1.
                 "P,<17 floats>\n" pushes a PID + ground-effect gain update.
                 "T,trim_t,trim_r,trim_p,trim_y\n" pushes trim.
     ESP -> PC : "H<yaw>\n"      float radians (sender heading bridge)
+
+`armed` addresses the drone the radio is currently pointed at. `fleet_armed`
+is broadcast to the whole fleet: every drone reads it from every packet and
+holds its motors armed-but-parked while it is set, without the radio having to
+visit each one. Only the targeted drone is ever allowed to fly (see the
+`flying` gate in the receiver firmware), so the fleet latch arms motors and
+nothing more. Disarming always clears both -- see cmd_arm().
 
 State machine
 -------------
@@ -97,6 +104,10 @@ class Controller:
         # External-arm flag from PC ("arm-drone" socket event)
         self._armed_requested = False
 
+        # Fleet-wide arm latch: broadcast to every drone, holds their motors
+        # armed-but-parked regardless of which one the radio is pointed at.
+        self._fleet_armed = False
+
         # Track sustained large z error -> EMERGENCY
         self._z_err_violation_since: Optional[float] = None
 
@@ -107,7 +118,22 @@ class Controller:
     def cmd_arm(self, armed: bool):
         self._armed_requested = bool(armed)
         if not armed:
+            # Disarming is always fleet-wide. A single fleet latch cannot park
+            # one drone while holding the others armed, and the safe reading of
+            # "disarm" is never "leave the other props spinning".
+            self._fleet_armed = False
             self._go(State.IDLE)
+
+    def cmd_fleet_arm(self, armed: bool):
+        """Hold every drone in the fleet armed-but-parked.
+
+        Broadcast in every state packet, so it reaches drones the radio is not
+        pointed at. Arming the fleet does not make any of them flyable: the
+        receiver only sets `flying` from a packet addressed to it."""
+        self._fleet_armed = bool(armed)
+
+    def is_fleet_armed(self) -> bool:
+        return self._fleet_armed
 
     def cmd_takeoff(self, target_z: float = 0.20):
         if not self._armed_requested:
@@ -263,6 +289,10 @@ class Controller:
             if frac >= 1.0:
                 self._sp.z = 0.0
                 self._armed_requested = False  # cut motors at touchdown
+                # ...and never leave the rest of the fleet hot afterwards. Done
+                # here rather than relying on the UI's arm heartbeat to notice,
+                # so it holds with no browser attached.
+                self._fleet_armed = False
                 self._go(State.IDLE)
             return
 
@@ -283,12 +313,16 @@ class Controller:
             "y_sp":   float(sp_y),
             "z_sp":   float(sp_z),
             "armed":  int(armed),
+            "fleet_armed": int(self._fleet_armed),
             "state":  self.state.value,
         }
 
     def _packet_safe(self, pos=None) -> dict:
         # Disarmed: send setpoints == current position so the drone-side
         # integrators stay parked at zero error. Velocities zeroed.
+        # The fleet latch still rides along: this packet is what goes out when
+        # the *tracked* drone loses pose, and dropping the bit there would
+        # disarm the whole parked fleet every time tracking blinked.
         px = float(pos[0]) if pos is not None else 0.0
         py = float(pos[1]) if pos is not None else 0.0
         pz = float(pos[2]) if pos is not None else 0.0
@@ -298,6 +332,7 @@ class Controller:
             "yaw_sp": float(self._sp.heading),
             "x_sp": px, "y_sp": py, "z_sp": pz,
             "armed": 0,
+            "fleet_armed": int(self._fleet_armed),
             "state": self.state.value,
         }
 
@@ -313,7 +348,7 @@ class Controller:
             f"{pkt['vx']:.4f},{pkt['vy']:.4f},{pkt['vz']:.4f},"
             f"{pkt['yaw_sp']:.4f},"
             f"{pkt['x_sp']:.4f},{pkt['y_sp']:.4f},{pkt['z_sp']:.4f},"
-            f"{int(pkt['armed'])}\n"
+            f"{int(pkt['armed'])},{int(pkt.get('fleet_armed', 0))}\n"
         ).encode()
 
     @staticmethod

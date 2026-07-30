@@ -31,6 +31,11 @@
 #define CRSF_TX_PIN 21
 #define ESPNOW_CHANNEL 1
 #define FAILSAFE_MS 500
+
+// Must match sender_esp32.ino. Packets carrying anything else are rejected
+// with a log line, so a board left on an old build says so instead of going
+// silently deaf.
+#define STATE_PROTO_VER 2
 #define TELEMETRY_PERIOD_MS 20   // 50 Hz drone -> laptop attitude updates
 #define DEBUG_RX_PRINT 0
 #define ENABLE_YAW_HOLD 0
@@ -71,8 +76,10 @@ typedef struct __attribute__((packed)) {
   float    x_sp, y_sp, z_sp;
   float    pid[17];
   int16_t  trim_t, trim_r, trim_p, trim_y;
-  uint8_t  armed;
+  uint8_t  armed;                // 0=disarmed, 1=armed & parked, 2=armed & flying (targeted drone)
+  uint8_t  fleet_armed;          // 1 = EVERY drone holds motors armed but parked
   uint8_t  msg_type;             // 0=state, 2=pid_gains, 3=trim
+  uint8_t  proto_ver;            // STATE_PROTO_VER
   uint8_t  target[6];            // selected drone's STA MAC; only that drone acts on this packet
   uint32_t seq;
 } StatePacket;
@@ -96,8 +103,9 @@ uint16_t channels[16];
 
 // ---------------- PID state ----------------
 
-bool armed  = false;   // motors energised (FC arm switch high)
-bool flying = false;   // armed AND z PID is allowed to drive throttle
+bool armed    = false; // motors energised (FC arm switch high)
+bool flying   = false; // armed AND z PID is allowed to drive throttle
+bool selected = false; // this drone is the radio's current target
 unsigned long timeArmed = 0;
 
 int xTrim = 0, yTrim = 0, zTrim = 0, yawTrim = 0;
@@ -287,21 +295,53 @@ void parseCRSFByte(uint8_t b) {
 
 // ---------------- ESP-NOW ----------------
 
-void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
-  if (len != sizeof(StatePacket)) return;
-  StatePacket pkt;
-  memcpy(&pkt, incomingData, sizeof(pkt));
+// Rate-limited complaint about a firmware/protocol mismatch. Without this a
+// mismatched board just ignores every packet and looks like dead hardware.
+static void warnMismatch(const char *what, int got, int expected) {
+  static uint32_t lastWarn = 0;
+  if (millis() - lastWarn < 2000) return;
+  lastWarn = millis();
+  Serial.printf("[rx] %s %d != expected %d -- StatePacket mismatch, reflash "
+                "this board (and the sender) from the same commit\n",
+                what, got, expected);
+}
 
-  // Broadcast addressing: every drone hears every packet. Only the selected
-  // drone (target == our MAC) acts on it. A non-selected drone forces itself
-  // disarmed and does NOT refresh lastRecvTime -- because broadcast keeps the
-  // packets flowing, the comm-loss failsafe alone would never catch a
-  // deselection, so this is the safety gate that parks a deselected drone.
-  if (memcmp(pkt.target, myMac, 6) != 0) {
-    armed  = false;
-    flying = false;
+void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
+  if (len != sizeof(StatePacket)) {
+    warnMismatch("packet size", len, (int)sizeof(StatePacket));
     return;
   }
+  StatePacket pkt;
+  memcpy(&pkt, incomingData, sizeof(pkt));
+  if (pkt.proto_ver != STATE_PROTO_VER) {
+    warnMismatch("protocol version", pkt.proto_ver, STATE_PROTO_VER);
+    return;
+  }
+
+  // Broadcast addressing: every drone hears every packet, but only the drone
+  // named in pkt.target may consume setpoints or fly. A non-targeted drone
+  // still honours the fleet-wide arm bit -- motors energised, nothing else --
+  // and treats the broadcast as proof the ground station is alive, so the
+  // 500 ms comm-loss failsafe still covers it if the sender dies.
+  //
+  // Safety rests on loop(): while !selected it emits setSafeChannels(), so
+  // sticks are centred and throttle is at minimum no matter what stale
+  // position error the PIDs are still chewing on.
+  if (memcmp(pkt.target, myMac, 6) != 0) {
+    if (pkt.msg_type == 0) {
+      selected = false;
+      flying   = false;
+      if (!pkt.fleet_armed) {
+        armed = false;
+      } else if (!armed) {
+        armed = true;
+        timeArmed = millis();
+      }
+      lastRecvTime = millis();
+    }
+    return;
+  }
+  selected = true;
   lastRecvTime = millis();
 
   if (pkt.msg_type == 0) {
@@ -416,8 +456,9 @@ void loop() {
   // 2) Failsafe if PC comm died -- disarm and force safe sticks.
   bool failsafe = (millis() - lastRecvTime > FAILSAFE_MS);
   if (failsafe) {
-    armed  = false;
-    flying = false;
+    armed    = false;
+    flying   = false;
+    selected = false;
   }
 
   // 3) PID loop runs every loop iteration (~500 Hz pacing below).
@@ -478,6 +519,12 @@ void loop() {
 
   if (failsafe) {
     setSafeChannels();
+  } else if (!selected) {
+    // Not the radio's target: the PIDs are still running against whatever
+    // position error we last saw, so never let their output reach the sticks.
+    // Safe sticks + minimum throttle; only the arm switch may be high.
+    setSafeChannels();
+    channels[4] = armed ? usToCRSF(2000) : usToCRSF(1000);
   } else {
     for (int i = 0; i < 16; i++) channels[i] = 992;
     channels[0] = pwmToCRSF(-yPWM + 1984);  // roll  (axis flipped vs y body)

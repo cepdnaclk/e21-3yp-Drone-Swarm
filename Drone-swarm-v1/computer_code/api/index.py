@@ -258,7 +258,8 @@ _heading_lpf = LowPassFilter(
 _state_lock = threading.Lock()
 _emit_state = {
     "pos": None, "vel": None, "heading": None, "heading_age": None,
-    "setpoint": None, "armed": 0, "state": "IDLE", "fps": 0.0,
+    "setpoint": None, "armed": 0, "fleet_armed": 0, "state": "IDLE",
+    "fps": 0.0,
 }
 
 
@@ -413,12 +414,17 @@ def _control_loop():
             # but do not permit actual closed-loop flight without a pose.
             ctrl_state = controller.get_state()
             if ctrl_state in ("TAKEOFF", "HOVER", "LANDING"):
+                # armed=0 refuses closed-loop flight without a pose, but the
+                # fleet latch must ride along: dropping it here would disarm
+                # every parked drone the moment the tracked one lost its fix.
                 pkt = {
                     "x": 0.0, "y": 0.0, "z": 0.0,
                     "vx": 0.0, "vy": 0.0, "vz": 0.0,
                     "yaw_sp": 0.0,
                     "x_sp": 0.0, "y_sp": 0.0, "z_sp": 0.0,
-                    "armed": 0, "state": ctrl_state,
+                    "armed": 0,
+                    "fleet_armed": int(controller.is_fleet_armed()),
+                    "state": ctrl_state,
                 }
             else:
                 zero = np.zeros(3, dtype=np.float32)
@@ -441,6 +447,7 @@ def _control_loop():
                 _emit_state["heading_age"] = (now - heading_t) if heading_t else None
                 _emit_state["setpoint"] = [pkt["x_sp"], pkt["y_sp"], pkt["z_sp"]]
                 _emit_state["armed"] = pkt["armed"]
+                _emit_state["fleet_armed"] = pkt.get("fleet_armed", 0)
                 _emit_state["state"] = ctrl_state
                 _emit_state["fps"] = cameras.fps()
                 _emit_state["tracker_fresh"] = tracker_fresh
@@ -475,6 +482,31 @@ def _emitter_loop():
 
 _radio_lock = threading.Lock()
 
+# Every command the console understands. Validated before we touch the fleet so
+# a typo reports "unknown command" instead of "no active drone".
+CONSOLE_COMMANDS = ("arm", "takeoff", "land", "goto", "move", "yaw",
+                    "hover", "trim", "pid", "estop", "ping")
+
+# Commands that can be fanned out across the whole fleet. Everything else
+# drives the single shared flight controller, so it can only ever address one
+# drone at a time -- see the note in _resolve_targets.
+#
+# "arm" is here because the state packet carries a fleet-wide arm bit that
+# every drone reads whether or not it is the radio's target (see
+# Controller.cmd_fleet_arm and the receiver's OnDataRecv). Arming the fleet
+# only energises motors -- the firmware still lets one drone fly at a time.
+FANOUT_COMMANDS = {"ping", "estop", "trim", "pid", "arm"}
+
+ARM_ON_WORDS = ("on", "1", "true")
+ARM_OFF_WORDS = ("off", "0", "false")
+
+# Dwell after retargeting during a fan-out so the CONTROL_HZ loop gets a few
+# packets out to the newly-targeted drone before we move on to the next.
+RETARGET_DWELL_S = 0.15
+
+# Upper altitude bound for commanded setpoints, kept in step with takeoff's.
+MAX_SETPOINT_Z = 2.0
+
 
 def _broadcast_fleet():
     with _fleet_lock:
@@ -482,30 +514,63 @@ def _broadcast_fleet():
                                 "selected_mac": _selected_drone_mac})
 
 
-def _resolve_target(target):
-    """Resolve a console target to a fleet entry. "all" resolves to the
-    currently selected drone: the sender ESP-NOW *broadcasts* every state
-    packet to the whole fleet, but each packet carries a target MAC and only
-    the matching drone acts on it -- so commands still address one drone at a
-    time. Raises ValueError on bad or inactive targets."""
+def _arm_flag(args):
+    """True/False for a valid `arm` argument, None if it isn't one."""
+    flag = args[0].lower() if args else ""
+    if flag in ARM_ON_WORDS:
+        return True
+    if flag in ARM_OFF_WORDS:
+        return False
+    return None
+
+
+def _console_uses_radio(command, fleet_wide):
+    """Whether the sender's ESP-NOW target must be walked across the fleet.
+
+    trim/pid are one-shot packets stamped with the target MAC, so each drone
+    has to be selected in turn. Fleet-wide arm and estop instead ride the
+    broadcast fleet-arm bit, which every drone reads regardless of selection,
+    so they reach the whole fleet without disturbing the operator's choice.
+    ping only reads backend-side state."""
+    if command in ("trim", "pid"):
+        return True
+    if command in ("ping", "estop"):
+        return False
+    if command == "arm":
+        return not fleet_wide
+    return True  # single-drone flight commands
+
+
+def _resolve_targets(target):
+    """Resolve a console target to a list of fleet entries.
+
+    "all" resolves to *every* active drone. The sender ESP-NOW broadcasts each
+    packet to the whole fleet, but every packet carries a target MAC and only
+    the matching drone acts on it, so addressing the fleet means walking the
+    radio across it one drone at a time (see FANOUT_COMMANDS). The currently
+    selected drone is returned first, so commands that cannot be fanned out
+    collapse onto the operator's selection rather than an arbitrary drone.
+
+    A single target matches on id, MAC or name (names are what the UI shows,
+    so they are what operators type). Raises ValueError on bad or inactive
+    targets."""
     if not target or target == "all":
+        sel = _selected_drone_mac
         with _fleet_lock:
-            sel = _selected_drone_mac
-            for d in _fleet:
-                if sel and d["mac"] == sel and d["active"]:
-                    return dict(d)
-            # No valid selection yet: fall back to the first active drone.
-            for d in _fleet:
-                if d["active"]:
-                    return dict(d)
-        raise ValueError("no active drone in the fleet")
+            active = [dict(d) for d in _fleet if d["active"]]
+        if not active:
+            raise ValueError("no active drone in the fleet")
+        active.sort(key=lambda d: d["mac"] != sel)  # stable: selected first
+        return active
+    key = str(target).strip()
+    mac = _normalise_mac(key)
     with _fleet_lock:
         for d in _fleet:
-            if d["id"] == target or d["mac"] == _normalise_mac(str(target)):
+            if d["id"] == key or d["mac"] == mac or d["name"].lower() == key.lower():
                 if not d["active"]:
                     raise ValueError(f"drone '{d['name']}' is on standby")
-                return dict(d)
-    raise ValueError(f"unknown target '{target}'")
+                return [dict(d)]
+    raise ValueError(f"unknown target '{key}'")
 
 
 def _retarget_radio(mac: str, force: bool = False):
@@ -529,8 +594,9 @@ def _current_position():
     return list(pos) if pos else None
 
 
-def _console_dispatch(command: str, args, target_entry):
+def _console_dispatch(command: str, args, target_entry, fleet_wide=False):
     """Execute one console command. Returns the ack text.
+    `fleet_wide` is True when the operator targeted the whole fleet.
     Raises ValueError with a user-facing message on bad input."""
 
     def _floats(n):
@@ -541,17 +607,30 @@ def _console_dispatch(command: str, args, target_entry):
         except ValueError:
             raise ValueError(f"{command}: arguments must be numbers")
 
+    def _z_ok(z, what):
+        if not 0.0 <= z <= MAX_SETPOINT_Z:
+            raise ValueError(f"{what}: z must be in [0, {MAX_SETPOINT_Z:g}] metres")
+
     if command == "arm":
-        if not args or args[0].lower() not in ("on", "off"):
+        on = _arm_flag(args)
+        if on is None:
             raise ValueError("usage: arm <on|off>")
-        on = args[0].lower() == "on"
+        if fleet_wide:
+            # Latches the broadcast arm bit so drones the radio is not pointed
+            # at energise too. cmd_arm(False) clears it, so disarming is always
+            # fleet-wide regardless of this flag.
+            controller.cmd_fleet_arm(on)
         controller.cmd_arm(on)
-        return f"{'armed' if on else 'disarmed'} (state {controller.get_state()})"
+        if not on:
+            return f"disarmed (state {controller.get_state()})"
+        if target_entry and target_entry["mac"] != _selected_drone_mac:
+            return "armed — motors parked (not the tracked drone)"
+        return f"armed (state {controller.get_state()})"
 
     if command == "takeoff":
         (z,) = _floats(1)
-        if z <= 0 or z > 2.0:
-            raise ValueError("takeoff: z must be in (0, 2.0] metres")
+        if z <= 0 or z > MAX_SETPOINT_Z:
+            raise ValueError(f"takeoff: z must be in (0, {MAX_SETPOINT_Z:g}] metres")
         if not controller.is_armed():
             raise ValueError("takeoff: drone is not armed (send 'arm on' first)")
         controller.cmd_takeoff(z)
@@ -563,12 +642,14 @@ def _console_dispatch(command: str, args, target_entry):
 
     if command == "goto":
         x, y, z = _floats(3)
+        _z_ok(z, "goto")
         controller.cmd_setpoint(x, y, z)
         return f"setpoint -> ({x:.2f}, {y:.2f}, {z:.2f})"
 
     if command == "move":
         dx, dy, dz = _floats(3)
         sx, sy, sz, _ = controller.get_setpoint()
+        _z_ok(sz + dz, "move")
         controller.cmd_setpoint(sx + dx, sy + dy, sz + dz)
         return f"setpoint -> ({sx + dx:.2f}, {sy + dy:.2f}, {sz + dz:.2f})"
 
@@ -581,7 +662,11 @@ def _console_dispatch(command: str, args, target_entry):
         # The controller holds the latched setpoint by itself; hover is an
         # acknowledgement that nothing will be retargeted for N seconds.
         secs = _floats(1)[0] if args else 0.0
-        return f"holding setpoint{f' for {secs:.1f} s' if secs else ''}"
+        if secs < 0:
+            raise ValueError("hover: seconds must not be negative")
+        sx, sy, sz, _ = controller.get_setpoint()
+        return (f"holding setpoint ({sx:.2f}, {sy:.2f}, {sz:.2f})"
+                f"{f' for {secs:.1f} s' if secs else ''}")
 
     if command == "trim":
         t = _floats(4)
@@ -591,8 +676,8 @@ def _console_dispatch(command: str, args, target_entry):
     if command == "pid":
         idx_f, value = _floats(2)
         idx = int(idx_f)
-        if not 0 <= idx < 17:
-            raise ValueError("pid: index must be 0..16")
+        if idx != idx_f or not 0 <= idx < NUM_PID:
+            raise ValueError(f"pid: index must be a whole number 0..{NUM_PID - 1}")
         with _pid_lock:
             _current_pid[idx] = value
             gains = list(_current_pid)
@@ -604,45 +689,99 @@ def _console_dispatch(command: str, args, target_entry):
         return "EMERGENCY STOP — disarmed"
 
     if command == "ping":
-        pos = _current_position()
         with _battery_lock:
             batt = dict(_battery)
+        if not target_entry:
+            return (f"state {controller.get_state()}, "
+                    f"{len(batt)} drone(s) reporting battery")
+        b = batt.get(target_entry["mac"])
+        batt_txt = f"{b['pct']}% ({b['mv']} mV)" if b else "no battery data"
+        # Pose and controller state belong to whichever drone the mocap rig is
+        # currently tracking -- there is one shared estimator, so reporting
+        # them for every drone would be a lie.
+        if target_entry["mac"] != _selected_drone_mac:
+            return f"not tracked (no pose/state), battery {batt_txt}"
+        pos = _current_position()
         pos_txt = ("(" + ", ".join(f"{v:.2f}" for v in pos) + ")") if pos else "unknown"
-        if target_entry:
-            b = batt.get(target_entry["mac"])
-            batt_txt = f"{b['pct']}% ({b['mv']} mV)" if b else "no battery data"
-            return (f"{target_entry['name']}: state {controller.get_state()}, "
-                    f"pos {pos_txt}, battery {batt_txt}")
-        return f"state {controller.get_state()}, pos {pos_txt}, {len(batt)} drone(s) reporting battery"
+        return (f"state {controller.get_state()}, pos {pos_txt}, "
+                f"battery {batt_txt}")
 
     raise ValueError(f"unknown command '{command}'")
+
+
+def _console_emit(event, target, text):
+    socketio.emit(event, {"target": target, "text": text})
 
 
 @socketio.on("console-command")
 def on_console_command(data):
     if not isinstance(data, dict):
         return
-    target = str(data.get("target", "all"))
+    target = str(data.get("target", "all")).strip() or "all"
     command = str(data.get("command", "")).strip().lower()
     args = [str(a) for a in (data.get("args") or [])]
 
+    if not command:
+        return
+    if command not in CONSOLE_COMMANDS:
+        _console_emit("console-error", target, f"unknown command '{command}'")
+        return
+    if command == "arm" and _arm_flag(args) is None:
+        # Settled up front so a usage error never drags a fan-out note with it.
+        _console_emit("console-error", target, "usage: arm <on|off>")
+        return
     if calibration.active and command not in ("ping", "estop", "land"):
-        socketio.emit("console-error", {
-            "target": target,
-            "text": "calibration in progress — flight commands are disabled"})
+        _console_emit("console-error", target,
+                      "calibration in progress — flight commands are disabled")
         return
 
+    fleet_wide = target == "all"
     try:
-        entry = _resolve_target(target)
-        _retarget_radio(entry["mac"])
-        text = f"[{entry['name']}] {_console_dispatch(command, args, entry)}"
-        socketio.emit("console-ack", {"target": target, "text": text})
-        print(f"[console] {target}: {command} {' '.join(args)} -> {text}")
+        entries = _resolve_targets(target)
     except ValueError as e:
-        socketio.emit("console-error", {"target": target, "text": str(e)})
-    except Exception as e:  # never let a console command kill the handler
-        socketio.emit("console-error", {"target": target, "text": f"internal error: {e}"})
-        print(f"[console] ERROR on '{command}': {e}")
+        # An emergency stop must still cut the shared controller even when the
+        # fleet is empty or every drone has been put on standby.
+        if command == "estop":
+            controller.cmd_arm(False)
+            _console_emit("console-ack", "swarm",
+                          f"EMERGENCY STOP — controller disarmed ({e})")
+            return
+        _console_emit("console-error", target, str(e))
+        return
+
+    if len(entries) > 1 and command not in FANOUT_COMMANDS:
+        # One shared flight controller means only one drone can be flown at a
+        # time. Say so out loud instead of silently addressing one of them.
+        entries = entries[:1]
+        _console_emit("console-note", target,
+                      f"'{command}' drives the shared flight controller and "
+                      f"cannot be broadcast — sending to {entries[0]['name']} only")
+
+    uses_radio = _console_uses_radio(command, fleet_wide)
+    restore_mac = _selected_drone_mac if len(entries) > 1 else None
+    try:
+        for entry in entries:
+            if uses_radio:
+                _retarget_radio(entry["mac"])
+                if len(entries) > 1:
+                    time.sleep(RETARGET_DWELL_S)
+            # One drone failing must not swallow the rest of the fan-out.
+            try:
+                text = _console_dispatch(command, args, entry, fleet_wide)
+            except ValueError as e:
+                _console_emit("console-error", entry["name"], str(e))
+                continue
+            except Exception as e:  # never let a command kill the handler
+                _console_emit("console-error", entry["name"], f"internal error: {e}")
+                print(f"[console] ERROR on '{command}' for {entry['name']}: {e}")
+                continue
+            _console_emit("console-ack", entry["name"], text)
+            print(f"[console] {entry['name']}: {command} {' '.join(args)} -> {text}")
+    finally:
+        # A fan-out walks the radio across the fleet; put the operator's
+        # selection back so MoCap/Drones don't silently follow it.
+        if uses_radio and restore_mac:
+            _retarget_radio(restore_mac)
 
 
 # =========================

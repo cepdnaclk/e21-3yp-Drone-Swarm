@@ -45,6 +45,8 @@ type DroneState = {
   heading: number | null;
   heading_age: number | null;
   sticks: number[] | null;
+  armed: number;
+  fleet_armed: number;
   state: string;
   fps: number;
   tracker_fresh: boolean;
@@ -122,12 +124,17 @@ export default function MoCapView() {
     heading: null,
     heading_age: null,
     sticks: null,
+    armed: 0,
+    fleet_armed: 0,
     state: "IDLE",
     fps: 0,
     tracker_fresh: false,
   });
 
   const [droneArmed, setDroneArmed] = useState(false);
+  // When the operator last clicked Arm/Disarm here, so in-flight drone-state
+  // packets carrying the pre-click value don't immediately revert the toggle.
+  const armTouchedAt = useRef(0);
   const [takeoffZ, setTakeoffZ] = useState("0.20");
   const [dronePID, setDronePID] = useState<string[]>(DEFAULT_PID);
   const [droneSetpoint, setDroneSetpoint] = useState<string[]>(["0", "0", "0.20"]);
@@ -177,6 +184,15 @@ export default function MoCapView() {
     });
     socket.on("drone-state", (data: DroneState) => {
       setDroneState(data);
+      // Follow the backend's real arm state. The heartbeat below re-emits
+      // droneArmed every 500 ms, so if this toggle didn't track the backend it
+      // would undo any arm/disarm issued from the Console within half a second.
+      // Packets already in flight when the operator hits the button still carry
+      // the old value, so ignore them briefly rather than fight our own click.
+      if (typeof data?.armed === "number" &&
+          Date.now() - armTouchedAt.current > 1000) {
+        setDroneArmed(data.armed !== 0);
+      }
     });
     socket.on("settings", (data: {
       pid?: number[];
@@ -447,7 +463,10 @@ export default function MoCapView() {
                   <button
                     type="button"
                     className={`btn ${droneArmed ? "btn-danger" : "btn-success"}`}
-                    onClick={() => setDroneArmed(!droneArmed)}
+                    onClick={() => {
+                      armTouchedAt.current = Date.now();
+                      setDroneArmed(!droneArmed);
+                    }}
                   >
                     {droneArmed ? "Disarm" : "Arm"}
                   </button>

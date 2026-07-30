@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="User manual for the Drone Swarm Research Platform control application — installation, calibration, flight, console commands, and mission scripting.">
+  <title>User Manual | Drone Swarm Research Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary:       #ffed00;
+      --primary-deep:  #e6d200;
+      --ink:           #000000;
+      --body:          #222222;
+      --charcoal:      #333333;
+      --mute:          #666666;
+      --ash:           #8a8a8a;
+      --stone:         #c4c4c4;
+      --on-dark:       #ffffff;
+      --on-dark-mute:  rgba(255, 255, 255, 0.72);
+      --canvas:        #ffffff;
+      --surface-soft:  #f7f7f7;
+      --surface-dark:  #000000;
+      --surface-deep:  #111111;
+      --hairline:      #f2f2f2;
+      --divider-dark:  rgba(255, 255, 255, 0.16);
+      --error:         #be6464;
+      --warning:       #f0ad4e;
+      --success:       #8dc572;
+      --info:          #337ab7;
+      --nav-h:         60px;
+      --transition:    180ms ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html {
+      scroll-behavior: smooth;
+      font-size: 16px;
+      scroll-padding-top: calc(var(--nav-h) + 24px);
+    }
+    body {
+      font-family: 'Manrope', Arial, sans-serif;
+      background: var(--canvas);
+      color: var(--body);
+      font-weight: 400;
+      line-height: 1.55;
+      overflow-x: hidden;
+    }
+    a {
+      color: var(--ink);
+      text-decoration-color: currentColor;
+      text-underline-offset: 3px;
+    }
+    a:hover { text-decoration-thickness: 2px; }
+    h1, h2, h3, h4 {
+      color: var(--ink);
+      font-family: inherit;
+      font-weight: 700;
+    }
+    ::selection { background: var(--primary); color: var(--ink); }
+    :focus-visible { outline: 3px solid var(--primary-deep); outline-offset: 3px; }
+
+    /* ── Top nav ─────────────────────────────────────────────── */
+    #navbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: var(--nav-h);
+      display: flex; align-items: center;
+      padding: 0 clamp(20px, 4vw, 56px);
+      background: var(--canvas);
+      border-bottom: 1px solid var(--hairline);
+    }
+    .nav-brand {
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 0.9rem;
+      letter-spacing: 0.01em;
+      text-decoration: none;
+    }
+    .nav-brand:hover { text-decoration: none; }
+    .nav-brand span { color: var(--ink); }
+    .nav-right { margin-left: auto; }
+    .nav-right a {
+      display: inline-flex;
+      min-height: 40px;
+      align-items: center;
+      padding: 0 16px;
+      color: var(--ink);
+      background: var(--canvas);
+      border: 1px solid var(--ink);
+      border-radius: 2px;
+      font-size: 0.8125rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-decoration: none;
+      transition: var(--transition);
+    }
+    .nav-right a:hover {
+      color: var(--on-dark);
+      background: var(--surface-dark);
+      text-decoration: none;
+    }
+
+    /* ── Hero ────────────────────────────────────────────────── */
+    .hero {
+      padding: calc(var(--nav-h) + 80px) clamp(20px, 6vw, 88px) 80px;
+      color: var(--on-dark);
+      background: var(--surface-dark);
+    }
+    .hero-inner {
+      width: 100%;
+      max-width: 1280px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .hero-kicker {
+      display: table;
+      width: auto;
+      padding: 7px 12px;
+      color: var(--ink);
+      background: var(--primary);
+      font-size: 0.625rem;
+      font-weight: 700;
+      line-height: 1.45;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    .hero-title {
+      color: var(--on-dark);
+      font-weight: 700;
+      font-size: clamp(2.5rem, 6vw, 3.5rem);
+      line-height: 0.95;
+      letter-spacing: -0.035em;
+      margin-bottom: 24px;
+    }
+    .hero-sub {
+      max-width: 680px;
+      color: var(--on-dark-mute);
+      font-size: 1.125rem;
+      line-height: 1.5;
+      margin-bottom: 32px;
+    }
+    .hero-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      display: inline-flex;
+      min-height: 36px;
+      align-items: center;
+      padding: 8px 16px;
+      color: var(--on-dark);
+      background: var(--surface-dark);
+      border: 1px solid var(--on-dark);
+      border-radius: 46px;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+    .chip::before { display: none; }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    .page {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: clamp(40px, 6vw, 88px);
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 80px clamp(20px, 4vw, 56px);
+    }
+    .toc {
+      position: sticky;
+      top: calc(var(--nav-h) + 32px);
+      align-self: start;
+      border-top: 2px solid var(--ink);
+      font-size: 0.875rem;
+    }
+    .toc-title {
+      padding: 16px 12px 12px;
+      color: var(--ink);
+      font-size: 0.625rem;
+      font-weight: 700;
+      line-height: 1.45;
+      text-transform: uppercase;
+    }
+    .toc ul { list-style: none; }
+    .toc li { border-top: 1px solid var(--hairline); }
+    .toc li:last-child { border-bottom: 1px solid var(--hairline); }
+    .toc a {
+      display: block;
+      padding: 10px 12px;
+      color: var(--mute);
+      border-left: 4px solid transparent;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: var(--transition);
+    }
+    .toc a:hover {
+      color: var(--ink);
+      background: var(--surface-soft);
+      text-decoration: none;
+    }
+    .toc a.active {
+      color: var(--ink);
+      background: var(--primary);
+      border-left-color: var(--ink);
+    }
+
+    /* ── Content ─────────────────────────────────────────────── */
+    .content { min-width: 0; }
+    .content section {
+      margin-bottom: 80px;
+      padding-top: 24px;
+      border-top: 1px solid var(--ink);
+    }
+    .content section:last-child { margin-bottom: 0; }
+    .sec-head {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      align-items: end;
+      gap: 24px;
+      margin-bottom: 32px;
+    }
+    .secnum {
+      color: var(--ink);
+      font-size: clamp(2.5rem, 5vw, 3.5rem);
+      font-weight: 700;
+      line-height: 0.8;
+      letter-spacing: -0.05em;
+      font-variant-numeric: tabular-nums;
+    }
+    .content h2 {
+      font-size: clamp(2rem, 4vw, 2.5rem);
+      line-height: 0.95;
+      letter-spacing: -0.025em;
+    }
+    .content h3 {
+      color: var(--ink);
+      font-size: 1.25rem;
+      line-height: 1;
+      margin: 32px 0 12px;
+    }
+    .content p {
+      max-width: 76ch;
+      color: var(--body);
+      margin-bottom: 16px;
+    }
+    .content p.muted, .muted { color: var(--mute); }
+    .content ul, .content ol { margin: 0 0 20px 22px; }
+    .content li { margin-bottom: 8px; }
+    .content li::marker { color: var(--ink); font-weight: 700; }
+
+    code, kbd {
+      font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+      font-size: 0.86em;
+    }
+    code {
+      padding: 2px 5px;
+      color: var(--ink);
+      background: var(--surface-soft);
+      border-bottom: 1px solid var(--ink);
+    }
+    kbd {
+      padding: 2px 7px;
+      color: var(--on-dark);
+      background: var(--surface-dark);
+      border: 1px solid var(--surface-dark);
+      border-radius: 2px;
+    }
+    pre {
+      padding: 20px 24px;
+      margin: 16px 0 24px;
+      color: var(--on-dark);
+      background: var(--surface-deep);
+      border-left: 8px solid var(--primary);
+      overflow-x: auto;
+    }
+    pre code {
+      padding: 0;
+      color: var(--on-dark);
+      background: none;
+      border: 0;
+    }
+
+    .callout {
+      padding: 16px 20px;
+      margin: 20px 0;
+      color: var(--body);
+      background: var(--surface-soft);
+      border: 1px solid var(--ink);
+      border-left-width: 8px;
+      font-size: 0.875rem;
+    }
+    .callout strong:first-child { color: var(--ink); }
+    .callout.warn { border-left-color: var(--warning); }
+    .callout.danger { border-left-color: var(--error); }
+    .callout.tip { border-left-color: var(--success); }
+
+    table {
+      display: block;
+      width: 100%;
+      margin: 16px 0 24px;
+      border-collapse: collapse;
+      border-top: 2px solid var(--ink);
+      font-size: 0.875rem;
+      overflow-x: auto;
+    }
+    tbody {
+      display: table;
+      width: 100%;
+      min-width: 620px;
+    }
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--hairline);
+      vertical-align: top;
+    }
+    th {
+      color: var(--on-dark);
+      background: var(--surface-dark);
+      border-bottom-color: var(--surface-dark);
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    td:first-child { white-space: nowrap; }
+    tr:hover td { background: var(--surface-soft); }
+
+    .step-list { counter-reset: step; list-style: none; margin-left: 0 !important; }
+    .step-list > li {
+      counter-increment: step;
+      position: relative;
+      min-height: 36px;
+      padding-left: 52px;
+      margin-bottom: 16px;
+    }
+    .step-list > li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: -4px;
+      display: flex;
+      width: 36px;
+      height: 36px;
+      align-items: center;
+      justify-content: center;
+      color: var(--on-dark);
+      background: var(--surface-dark);
+      font-size: 0.8125rem;
+      font-weight: 700;
+    }
+
+    /* ── Card grid (interface tour, calibration steps) ───────── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 1px;
+      margin: 20px 0 8px;
+      padding: 1px;
+      background: var(--surface-dark);
+    }
+    .tour-card {
+      min-height: 188px;
+      padding: 24px;
+      background: var(--canvas);
+      transition: var(--transition);
+    }
+    .tour-card:hover { background: var(--surface-soft); }
+    .tour-icon {
+      display: flex;
+      width: 40px;
+      height: 40px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      color: var(--on-dark);
+      background: var(--surface-dark);
+    }
+    .tour-name {
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 1.125rem;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+    .tour-desc {
+      color: var(--mute);
+      font-size: 0.875rem;
+      line-height: 1.57;
+    }
+
+    /* ── Figures / screenshot placeholders ───────────────────── */
+    figure.fig { margin: 24px 0 32px; }
+    .fig-frame {
+      position: relative;
+      background: var(--surface-soft);
+      border: 1px solid var(--ink);
+      overflow: hidden;
+    }
+    .fig-frame img { display: block; width: 100%; }
+    .fig-ph {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      min-height: 230px;
+      padding: 30px 20px;
+      text-align: center;
+      color: var(--mute);
+      border: 2px dashed var(--stone);
+    }
+    .fig-frame.empty .fig-ph { display: flex; }
+    .fig-ph svg { width: 40px; height: 40px; color: var(--ink); }
+    .fig-ph-title {
+      color: var(--ink);
+      font-size: 0.875rem;
+      font-weight: 700;
+    }
+    .fig-ph small { font-size: 0.75rem; }
+    .fig-ph small code { font-size: 0.95em; }
+    figcaption {
+      padding: 10px 0 0;
+      color: var(--mute);
+      font-size: 0.75rem;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 900px) {
+      .hero { padding-top: calc(var(--nav-h) + 64px); }
+      .page {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+      .toc {
+        position: static;
+        min-width: 0;
+        margin-bottom: 0;
+      }
+      .toc-title { padding-left: 0; }
+      .toc ul {
+        display: flex;
+        gap: 8px;
+        padding-bottom: 8px;
+        overflow-x: auto;
+        scrollbar-width: thin;
+      }
+      .toc li,
+      .toc li:last-child { flex: none; border: 0; }
+      .toc a {
+        min-height: 36px;
+        padding: 8px 16px;
+        color: var(--ink);
+        background: var(--canvas);
+        border: 1px solid var(--ink);
+        border-radius: 46px;
+        white-space: nowrap;
+      }
+      .toc a.active { border-left-color: var(--ink); }
+    }
+
+    @media (max-width: 600px) {
+      #navbar { padding: 0 16px; }
+      .nav-brand { font-size: 0.75rem; }
+      .nav-right a {
+        min-height: 44px;
+        padding: 0 12px;
+        font-size: 0.75rem;
+      }
+      .hero {
+        padding: calc(var(--nav-h) + 48px) 20px 48px;
+      }
+      .hero-title { font-size: 2.5rem; }
+      .hero-sub { font-size: 1rem; }
+      .chip { min-height: 40px; }
+      .page { padding: 40px 20px; }
+      .content section {
+        margin-bottom: 56px;
+        padding-top: 20px;
+      }
+      .sec-head {
+        grid-template-columns: 48px minmax(0, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .secnum { font-size: 2.5rem; }
+      .content h2 { font-size: 2rem; }
+      .card-grid { grid-template-columns: 1fr; }
+      .tour-card { min-height: 0; padding: 20px; }
+      th, td { padding: 10px 12px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/>
+    <circle cx="12" cy="13" r="3.5"/>
+  </symbol>
+</svg>
+
+<nav id="navbar">
+  <a class="nav-brand" href="index.html">Drone<span>Swarm</span> · User Manual</a>
+  <div class="nav-right"><a href="index.html">← Project Home</a></div>
+</nav>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="hero-kicker">PERA Swarm · Indoor Drone Testbed</div>
+    <h1 class="hero-title">Operator's<br>Manual</h1>
+    <p class="hero-sub">Everything you need to install and operate the Drone Swarm control
+    application — from camera calibration to flying autonomous missions in the arena.</p>
+    <div class="hero-chips">
+      <span class="chip">Windows x64</span>
+      <span class="chip c-cyan">Ubuntu x64</span>
+      <span class="chip c-green">Runs 100% locally</span>
+      <span class="chip c-amber">4-camera tracking</span>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+
+  <aside class="toc">
+    <div class="toc-title">Contents</div>
+    <ul id="toc-list">
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#installation">Installation</a></li>
+      <li><a href="#first-launch">First Launch</a></li>
+      <li><a href="#interface">Interface Tour</a></li>
+      <li><a href="#camera-settings">Camera Settings</a></li>
+      <li><a href="#calibration">Calibration</a></li>
+      <li><a href="#drones">Drone Fleet</a></li>
+      <li><a href="#mocap">MoCap &amp; Flight</a></li>
+      <li><a href="#console">Console Commands</a></li>
+      <li><a href="#missions">Mission Scripts</a></li>
+      <li><a href="#safety">Safety</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+
+    <section id="overview">
+      <div class="sec-head"><span class="secnum">01</span><h2>Overview</h2></div>
+      <p>The Drone Swarm Research Platform is an indoor testbed for swarm-robotics experiments. The
+      control application runs entirely on your computer: a local backend tracks drones through four
+      USB cameras, talks to the swarm over an ESP32 radio link, and serves a browser-based control
+      interface. No cloud connection is needed to fly.</p>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/arena.jpg" alt="The indoor arena with four tracker cameras"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Photo — arena &amp; camera rig</span>
+            <small>Add <code>docs/images/manual/arena.jpg</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>The indoor arena with the four tracker cameras and the operator's station.</figcaption>
+      </figure>
+
+      <h3>What you need</h3>
+      <ul>
+        <li>A Windows or Ubuntu computer with four USB camera inputs available.</li>
+        <li>The four tracker cameras mounted around the arena and plugged in.</li>
+        <li>The ESP32 radio transceiver connected via USB (serial).</li>
+        <li>One or more platform drones with charged batteries.</li>
+        <li>A printed checkerboard pattern glued to a flat board for calibration
+            (default 9 × 6 inner corners, 23.9&nbsp;mm squares — see
+            <a href="#calibration">Calibration</a>).</li>
+      </ul>
+
+      <h3>Typical workflow</h3>
+      <ol class="step-list">
+        <li>Install and launch the application — the UI opens in your browser.</li>
+        <li>In <strong>Camera Settings</strong>, confirm camera indices and the serial port.</li>
+        <li>Run <strong>Calibration</strong> (only needed when cameras move or on first setup).</li>
+        <li>Register your drones in the <strong>Drones</strong> page.</li>
+        <li>Fly manually from <strong>MoCap</strong> or the <strong>Console</strong>, or upload a Python mission in <strong>Upload</strong>.</li>
+      </ol>
+    </section>
+
+    <section id="installation">
+      <div class="sec-head"><span class="secnum">02</span><h2>Installation</h2></div>
+      <p>Download the package for your operating system from the project's release page:</p>
+      <table>
+        <tr><th>Platform</th><th>Package</th><th>How to run</th></tr>
+        <tr><td>Windows</td><td><code>DroneSwarm-Windows-x64.exe</code></td>
+            <td>Double-click the executable.</td></tr>
+        <tr><td>Ubuntu</td><td><code>DroneSwarm-Ubuntu-x64.tar.gz</code></td>
+            <td>Extract, then run the <code>DroneSwarm</code> binary inside.</td></tr>
+      </table>
+      <p>The package is self-contained — you do not need Python, Node.js, or any libraries
+      installed.</p>
+
+      <div class="callout warn">
+        <strong>Ubuntu serial permission.</strong> To access the ESP32 radio, your user must be in
+        the <code>dialout</code> group:
+        <pre><code>sudo usermod -a -G dialout "$USER"</code></pre>
+        Log out and back in afterwards.
+      </div>
+
+      <h3>Where your data lives</h3>
+      <p>Calibration files, fleet registry, settings, and uploaded missions are stored in
+      <code>%APPDATA%\DroneSwarm</code> on Windows and <code>~/.config/DroneSwarm</code> on Ubuntu.
+      Deleting this folder resets the application.</p>
+
+      <h3>Optional environment variables</h3>
+      <table>
+        <tr><th>Variable</th><th>Effect</th></tr>
+        <tr><td><code>DRONE_BACKEND_PORT</code></td><td>Change the local port (default <code>3001</code>).</td></tr>
+        <tr><td><code>DRONE_SWARM_DATA_DIR</code></td><td>Override the writable data directory.</td></tr>
+        <tr><td><code>DRONE_OPEN_BROWSER=false</code></td><td>Don't auto-open the browser on launch.</td></tr>
+        <tr><td><code>DRONE_CAMERA_BACKEND</code></td><td>Force the camera backend: <code>dshow</code>, <code>v4l2</code>, or <code>default</code>.</td></tr>
+      </table>
+    </section>
+
+    <section id="first-launch">
+      <div class="sec-head"><span class="secnum">03</span><h2>First Launch</h2></div>
+      <ol class="step-list">
+        <li>Plug in all four cameras and the ESP32 radio <em>before</em> starting the app.</li>
+        <li>Run the application. The backend starts on <code>127.0.0.1:3001</code> and your default
+            browser opens the interface automatically. If it doesn't, browse to
+            <code>http://127.0.0.1:3001</code> yourself.</li>
+        <li>Open <strong>Camera Settings</strong> and check that each of the four camera slots shows
+            the right view, and that the correct serial port is selected.</li>
+        <li>If this is a new arena or the cameras have been moved, run the
+            <a href="#calibration">calibration wizard</a> before flying.</li>
+      </ol>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/ui-overview.png" alt="The application on first launch"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — app on first launch</span>
+            <small>Add <code>docs/images/manual/ui-overview.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>The interface after launch, with the sidebar on the left and the MoCap page open.</figcaption>
+      </figure>
+
+      <div class="callout">
+        <strong>Local only.</strong> The application binds to <code>127.0.0.1</code>; it is not
+        reachable from other machines on the network. Keep the terminal/console window it starts in
+        open while operating.</div>
+    </section>
+
+    <section id="interface">
+      <div class="sec-head"><span class="secnum">04</span><h2>Interface Tour</h2></div>
+      <p>The sidebar switches between six pages. All pages stay live in the background — switching
+      away doesn't stop streams, logs, or a running calibration.</p>
+      <div class="card-grid">
+        <div class="tour-card">
+          <div class="tour-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></div>
+          <div class="tour-name">MoCap</div>
+          <div class="tour-desc">Live tracking: camera stream, 3D scene, flight controls, PID tuning, telemetry.</div>
+        </div>
+        <div class="tour-card">
+          <div class="tour-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></div>
+          <div class="tour-name">Drones</div>
+          <div class="tour-desc">Register drones by name and MAC; monitor battery, position, and state.</div>
+        </div>
+        <div class="tour-card">
+          <div class="tour-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4z"/><path d="M8 10l3 2-3 2M13 14h4"/></svg></div>
+          <div class="tour-name">Console</div>
+          <div class="tour-desc">Type flight commands directly at a drone or the whole swarm.</div>
+        </div>
+        <div class="tour-card">
+          <div class="tour-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/></svg></div>
+          <div class="tour-name">Upload</div>
+          <div class="tour-desc">Upload and run Python mission scripts against the swarm API.</div>
+        </div>
+        <div class="tour-card">
+          <div class="tour-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+          <div class="tour-name">Calibration</div>
+          <div class="tour-desc">Four-step camera calibration wizard with live capture preview.</div>
+        </div>
+        <div class="tour-card">
+          <div class="tour-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a7.97 7.97 0 0 0 .1-6l-2.1.6a6 6 0 0 0-1.5-1.5l.6-2.1a8 8 0 0 0-6 .1l.6 2a6 6 0 0 0-1.5 1.5l-2.1-.6a8 8 0 0 0-.1 6l2.1-.6a6 6 0 0 0 1.5 1.5l-.6 2.1a8 8 0 0 0 6-.1l-.6-2a6 6 0 0 0 1.5-1.5z"/></svg></div>
+          <div class="tour-name">Camera Settings</div>
+          <div class="tour-desc">Assign USB camera indices and choose the ESP32 serial port.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="camera-settings">
+      <div class="sec-head"><span class="secnum">05</span><h2>Camera Settings</h2></div>
+      <h3>Camera indices</h3>
+      <p>Each tracker camera (<code>cam1</code>–<code>cam4</code>) is bound to a USB device index.
+      If the wrong physical camera shows up in a slot, change its index and apply. Applying releases
+      all four captures and reopens them on the new indices — the stream freezes for a few seconds
+      while this happens.</p>
+      <h3>Serial port</h3>
+      <p>Select the port where the ESP32 radio is connected (e.g. <code>COM5</code> on Windows,
+      <code>/dev/ttyUSB0</code> on Ubuntu) and apply. The current port is shown even if the device is
+      unplugged at the moment.</p>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/camera-settings.png" alt="Camera Settings page"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — Camera Settings page</span>
+            <small>Add <code>docs/images/manual/camera-settings.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>Camera index assignment and serial-port selection.</figcaption>
+      </figure>
+    </section>
+
+    <section id="calibration">
+      <div class="sec-head"><span class="secnum">06</span><h2>Calibration</h2></div>
+      <p>Calibration teaches the tracker where the cameras are and where the world origin is. Run it
+      on first setup and whenever a camera is moved, refocused, or replaced.</p>
+
+      <h3>Prepare the checkerboard first</h3>
+      <p>Before starting the wizard, <strong>print the checkerboard pattern and paste it onto a flat,
+      rigid surface</strong> — a clipboard, foam board, or piece of plywood works well. Any bending
+      or waviness in the paper ruins the calibration accuracy, so glue it down completely flat with
+      no bubbles or creases. Print at 100% scale (no "fit to page"), then measure one square with a
+      ruler to confirm the size — you'll enter this measurement in the wizard.</p>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/checkerboard.jpg" alt="Printed checkerboard mounted on a flat board"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Photo — checkerboard on a flat board</span>
+            <small>Add <code>docs/images/manual/checkerboard.jpg</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>The printed checkerboard pasted flat on a rigid board, ready for capture.</figcaption>
+      </figure>
+
+      <h3>The four steps</h3>
+      <table>
+        <tr><th>Step</th><th>What it does</th></tr>
+        <tr><td>1 · Intrinsics</td><td>Per-camera lens parameters. Show the checkerboard to each camera and capture views.</td></tr>
+        <tr><td>2 · Extrinsics</td><td>Camera positions relative to each other. Capture the board where camera pairs both see it.</td></tr>
+        <tr><td>3 · Landmarks</td><td>Sets the world origin and floor plane in the arena.</td></tr>
+        <tr><td>4 · Verify</td><td>Test tracking quality and accept or re-run the result.</td></tr>
+      </table>
+
+      <h3>Running the wizard</h3>
+      <ol class="step-list">
+        <li>Enter your checkerboard's inner-corner count and square size. Defaults match the
+            standard board: 9 columns × 6 rows, 23.9&nbsp;mm squares.</li>
+        <li>Choose the starting step. You can start midway (e.g. only re-do
+            <em>Landmarks</em>) — earlier steps are reused from the current calibration.</li>
+        <li>During the two capture steps, press <kbd>Space</kbd> to capture the current frame while
+            the Calibration page is visible.</li>
+        <li>Watch the per-step log for capture counts and reprojection errors, then verify and
+            accept.</li>
+      </ol>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/calibration-wizard.png" alt="Calibration wizard during intrinsics capture"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — calibration wizard (capture step)</span>
+            <small>Add <code>docs/images/manual/calibration-wizard.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>The wizard stepper with the live capture preview and per-step log.</figcaption>
+      </figure>
+
+      <div class="callout tip">
+        <strong>Tip.</strong> Capture the checkerboard at varied angles and distances, covering the
+        edges of each camera's view — this noticeably improves tracking accuracy.</div>
+    </section>
+
+    <section id="drones">
+      <div class="sec-head"><span class="secnum">07</span><h2>Drone Fleet</h2></div>
+      <p>Before a drone can be commanded it must be registered in the <strong>Drones</strong> page.</p>
+      <ol class="step-list">
+        <li>Enter a friendly name and the drone's MAC address in the form
+            <code>AA:BB:CC:DD:EE:FF</code> (dashes also accepted).</li>
+        <li>Add the drone. It appears in the fleet list with live battery, position, state, and a
+            "last seen" age.</li>
+        <li>Toggle <strong>Active</strong> to include or exclude the drone from swarm commands and
+            missions.</li>
+      </ol>
+      <p class="muted">Battery badges are colour-coded: green above 60%, amber above 25%, red below.
+      The fleet registry is saved on the backend, so it survives restarts.</p>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/drones.png" alt="Drone fleet page"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — Drones page with a registered fleet</span>
+            <small>Add <code>docs/images/manual/drones.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>Registered drones with live battery, position, and last-seen status.</figcaption>
+      </figure>
+    </section>
+
+    <section id="mocap">
+      <div class="sec-head"><span class="secnum">08</span><h2>MoCap &amp; Flight</h2></div>
+      <p>The MoCap page is the main flight screen for a single drone. Select the drone at the top,
+      then use the panels:</p>
+      <ul>
+        <li><strong>Camera stream</strong> — live tracker view with detection overlay, plus tracker
+            state, FPS, and heading age.</li>
+        <li><strong>3D scene</strong> — the drone's tracked position and setpoints in the arena.</li>
+        <li><strong>Flight</strong> — <em>Arm</em>/<em>Disarm</em>, <em>Takeoff</em> to a target
+            height (default 0.20&nbsp;m), and <em>Land</em>. Takeoff is only enabled while armed.</li>
+        <li><strong>PID</strong> — live controller gains. Change values only in small steps and be
+            ready to land; bad gains cause oscillation.</li>
+        <li><strong>Telemetry</strong> — position, heading (radians), battery, and controller state.</li>
+      </ul>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/mocap.png" alt="MoCap page during a hover"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — MoCap page during flight</span>
+            <small>Add <code>docs/images/manual/mocap.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>Camera stream, 3D scene, and flight controls during a hover test.</figcaption>
+      </figure>
+
+      <div class="callout warn">
+        <strong>Before arming:</strong> confirm tracking is stable (position updating, low heading
+        age), the arena is clear, and the drone is upright at a tracked location.</div>
+    </section>
+
+    <section id="console">
+      <div class="sec-head"><span class="secnum">09</span><h2>Console Commands</h2></div>
+      <p>The Console sends typed commands to the selected target — one drone or the whole swarm.
+      Every command is echoed in the history with its acknowledgement or error.</p>
+      <table>
+        <tr><th>Command</th><th>Description</th></tr>
+        <tr><td><code>arm &lt;on|off&gt;</code></td><td>Arm or disarm the targeted drone(s).</td></tr>
+        <tr><td><code>takeoff &lt;z&gt;</code></td><td>Climb to <em>z</em> metres and hold. <em>z</em> must be between 0 and 2.0, and the drone must be armed first.</td></tr>
+        <tr><td><code>land</code></td><td>Descend and disarm at touchdown.</td></tr>
+        <tr><td><code>goto &lt;x&gt; &lt;y&gt; &lt;z&gt;</code></td><td>Move to an absolute world position (metres).</td></tr>
+        <tr><td><code>move &lt;dx&gt; &lt;dy&gt; &lt;dz&gt;</code></td><td>Shift the setpoint relative to the current one.</td></tr>
+        <tr><td><code>yaw &lt;radians&gt;</code></td><td>Rotate to an absolute yaw angle.</td></tr>
+        <tr><td><code>hover &lt;seconds&gt;</code></td><td>Hold the current setpoint for N seconds.</td></tr>
+        <tr><td><code>trim &lt;T&gt; &lt;R&gt; &lt;P&gt; &lt;Y&gt;</code></td><td>Apply stick trim values (µs).</td></tr>
+        <tr><td><code>pid &lt;index&gt; &lt;value&gt;</code></td><td>Update one PID gain (index 0–16); the full gain set is re-sent.</td></tr>
+        <tr><td><code>estop</code></td><td><strong>Emergency stop</strong> — immediate motor cut.</td></tr>
+        <tr><td><code>ping</code></td><td>Status echo: state, position, battery.</td></tr>
+      </table>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/console.png" alt="Console page with command history"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — Console with command history</span>
+            <small>Add <code>docs/images/manual/console.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>Command history with acknowledgements, and the command reference cards.</figcaption>
+      </figure>
+
+      <div class="callout">
+        <strong>Example session.</strong>
+        <pre><code>arm on
+takeoff 0.5
+goto 0.8 0.4 0.5
+hover 3
+land</code></pre></div>
+    </section>
+
+    <section id="missions">
+      <div class="sec-head"><span class="secnum">10</span><h2>Mission Scripts</h2></div>
+      <p>The Upload page runs Python mission scripts against a restricted swarm API. Drag in a
+      <code>.py</code> file (only <code>.py</code> is accepted), review the preview, upload, and
+      run. Output from the script streams into the run log; a running mission can be stopped at any
+      time.</p>
+      <p>Scripts are validated before running: only calls to the functions below (plus
+      <code>print</code>/<code>log</code>) are permitted.</p>
+      <table>
+        <tr><th>Function</th><th>Description</th></tr>
+        <tr><td><code>arm()</code></td><td>Arm the drone. Blocks until the controller reaches READY.</td></tr>
+        <tr><td><code>disarm()</code></td><td>Disarm immediately.</td></tr>
+        <tr><td><code>takeoff(z)</code></td><td>Climb to <em>z</em> metres. Blocks until HOVER is reached.</td></tr>
+        <tr><td><code>land()</code></td><td>Descend and disarm at touchdown. Blocks until landed.</td></tr>
+        <tr><td><code>goto(x, y, z)</code></td><td>Retarget to an absolute world position (non-blocking).</td></tr>
+        <tr><td><code>move(dx, dy, dz)</code></td><td>Shift the setpoint relative to the current one (non-blocking).</td></tr>
+        <tr><td><code>set_yaw(yaw)</code></td><td>Rotate to an absolute yaw (radians).</td></tr>
+        <tr><td><code>wait(seconds)</code></td><td>Sleep — use after <code>goto</code>/<code>move</code> so the drone can get there.</td></tr>
+        <tr><td><code>get_position()</code></td><td>Latest tracked world position in metres, or <code>None</code>.</td></tr>
+        <tr><td><code>get_battery(drone_id)</code></td><td>Battery percentage by drone id, name, or MAC.</td></tr>
+        <tr><td><code>get_state()</code></td><td>Controller state (<code>IDLE</code>, <code>READY</code>, <code>TAKEOFF</code>, <code>HOVER</code>, …).</td></tr>
+        <tr><td><code>list_active()</code></td><td>Ids of all drones currently marked active.</td></tr>
+        <tr><td><code>on_telemetry(callback)</code></td><td>Callback fired on every battery telemetry packet.</td></tr>
+        <tr><td><code>log(*args)</code></td><td>Write a line to the run log.</td></tr>
+      </table>
+
+      <h3>Example mission</h3>
+      <pre><code>arm()
+takeoff(0.5)
+goto(0.8, 0.4, 0.5)
+wait(3)
+log("position:", get_position())
+land()</code></pre>
+
+      <figure class="fig">
+        <div class="fig-frame empty">
+          <img src="images/manual/upload.png" alt="Upload page with a mission running"
+               onload="this.parentElement.classList.remove('empty')"
+               onerror="this.remove()">
+          <div class="fig-ph">
+            <svg><use href="#i-cam"/></svg>
+            <span class="fig-ph-title">Screenshot — Upload page with run log</span>
+            <small>Add <code>docs/images/manual/upload.png</code> to replace this placeholder</small>
+          </div>
+        </div>
+        <figcaption>A mission script uploaded and running, with live output in the run log.</figcaption>
+      </figure>
+    </section>
+
+    <section id="safety">
+      <div class="sec-head"><span class="secnum">11</span><h2>Safety</h2></div>
+      <ul>
+        <li><strong>Emergency stop:</strong> type <code>estop</code> in the Console for an immediate
+            motor cut on the targeted drone(s). Prefer <code>land</code> when there is time for a
+            controlled descent.</li>
+        <li>Keep hands, faces, and loose objects out of the arena while any drone is armed.</li>
+        <li>Never leave a drone armed unattended — disarm as soon as flight is done.</li>
+        <li>Takeoff height is capped at 2.0&nbsp;m; stay well inside the calibrated tracking volume.</li>
+        <li>Land promptly when a battery badge turns amber; don't fly a red battery.</li>
+        <li>If tracking is lost mid-flight (frozen position, growing heading age), land or estop
+            immediately.</li>
+      </ul>
+      <div class="callout danger">
+        <strong>Props spin fast.</strong> Always disarm before handling a drone, and remove props
+        when bench-testing firmware or trim changes.</div>
+    </section>
+
+    <section id="troubleshooting">
+      <div class="sec-head"><span class="secnum">12</span><h2>Troubleshooting</h2></div>
+      <table>
+        <tr><th>Symptom</th><th>What to check</th></tr>
+        <tr><td>Camera error / frozen stream</td>
+            <td>Go to <strong>Camera Settings</strong> and re-apply the camera indices — this
+                releases and reloads all four cameras. If the error persists, close the application
+                completely and restart it with the cameras plugged in.</td></tr>
+        <tr><td>UI doesn't open</td>
+            <td>Browse to <code>http://127.0.0.1:3001</code> manually. If the port is taken, set
+                <code>DRONE_BACKEND_PORT</code> and restart.</td></tr>
+        <tr><td>Wrong / black camera views</td>
+            <td>Reassign indices in Camera Settings. On Windows try
+                <code>DRONE_CAMERA_BACKEND=dshow</code>; on Ubuntu <code>v4l2</code>. Ensure no other
+                app holds the cameras.</td></tr>
+        <tr><td>No serial connection</td>
+            <td>Pick the right port in Camera Settings. On Ubuntu, confirm your user is in the
+                <code>dialout</code> group (relog after adding).</td></tr>
+        <tr><td>Drone not responding</td>
+            <td>Check it's registered with the correct MAC, marked Active, and reporting battery
+                ("last seen" recent). Send <code>ping</code> from the Console.</td></tr>
+        <tr><td><code>takeoff</code> rejected</td>
+            <td>The drone must be armed first, and <em>z</em> must be in (0, 2.0] metres.</td></tr>
+        <tr><td>Poor tracking / drifting hover</td>
+            <td>Re-run calibration (start from <em>Extrinsics</em> if lenses are unchanged). Check
+                lighting and that all four cameras see the arena centre.</td></tr>
+        <tr><td>Mission upload rejected</td>
+            <td>Only <code>.py</code> files are accepted, and only the documented API calls are
+                allowed in the script.</td></tr>
+        <tr><td>Reset everything</td>
+            <td>Quit the app and delete the data folder (<code>%APPDATA%\DroneSwarm</code> or
+                <code>~/.config/DroneSwarm</code>). Calibration and fleet must then be redone.</td></tr>
+      </table>
+      <p class="muted">Still stuck? Open an issue on the project repository — include your OS, the
+      console output from the app, and what you were doing when it failed.</p>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // Highlight the TOC entry for the section in view.
+  const links = document.querySelectorAll('#toc-list a');
+  const map = {};
+  links.forEach(a => { map[a.getAttribute('href').slice(1)] = a; });
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting && map[e.target.id]) {
+        links.forEach(a => a.classList.remove('active'));
+        map[e.target.id].classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  document.querySelectorAll('main section[id]').forEach(s => obs.observe(s));
+</script>
+
+</body>
+</html>

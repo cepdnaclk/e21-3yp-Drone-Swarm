@@ -631,7 +631,13 @@
     <section id="first-launch">
       <div class="sec-head"><span class="secnum">03</span><h2>First Launch</h2></div>
       <ol class="step-list">
-        <li>Plug in all four cameras and the ESP32 radio <em>before</em> starting the app.</li>
+        <li>The download includes two Arduino <code>.ino</code> sketches: one for the ground ESP32
+            transmitter and one for the drone ESP32 receiver.</li>
+        <li>Before uploading the receiver sketch, check the MAC address of each ESP32 and add the
+            required MAC address values to the receiver code.</li>
+        <li>Use the Arduino IDE to upload the sender/transmitter sketch to the ground ESP32 and the
+            receiver sketch to each drone ESP32.</li>
+        <li>Plug in all four cameras and the ground ESP32 radio <em>before</em> starting the app.</li>
         <li>Run the application. The backend starts on <code>127.0.0.1:3001</code> and your default
             browser opens the interface automatically. If it doesn't, browse to
             <code>http://127.0.0.1:3001</code> yourself.</li>

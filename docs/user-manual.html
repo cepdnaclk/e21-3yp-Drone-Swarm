@@ -598,13 +598,14 @@
       <p>Download the package for your operating system from the project's release page:</p>
       <table>
         <tr><th>Platform</th><th>Package</th><th>How to run</th></tr>
-        <tr><td>Windows</td><td><code>DroneSwarm-Windows-x64.exe</code></td>
-            <td>Double-click the executable.</td></tr>
+        <tr><td>Windows</td><td><code>DroneSwarm-Windows-x64.zip</code></td>
+            <td>Extract the ZIP, then double-click <code>DroneSwarm.exe</code>.</td></tr>
         <tr><td>Ubuntu</td><td><code>DroneSwarm-Ubuntu-x64.tar.gz</code></td>
             <td>Extract, then run the <code>DroneSwarm</code> binary inside.</td></tr>
       </table>
       <p>The package is self-contained — you do not need Python, Node.js, or any libraries
-      installed.</p>
+      installed. The Windows ZIP also contains <code>sender_esp32.ino</code> and
+      <code>receiver_drone1.ino</code> for programming the ESP32 boards.</p>
 
       <div class="callout warn">
         <strong>Ubuntu serial permission.</strong> To access the ESP32 radio, your user must be in

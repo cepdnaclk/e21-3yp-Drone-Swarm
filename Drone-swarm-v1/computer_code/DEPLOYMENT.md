@@ -27,7 +27,15 @@ powershell -ExecutionPolicy Bypass -File .\Drone-swarm-v1\computer_code\scripts\
 Output:
 
 ```text
-Drone-swarm-v1/computer_code/release/DroneSwarm-Windows-x64.exe
+Drone-swarm-v1/computer_code/release/DroneSwarm-Windows-x64.zip
+```
+
+The Windows ZIP contains:
+
+```text
+DroneSwarm.exe
+sender_esp32.ino
+receiver_drone1.ino
 ```
 
 ## Build on Ubuntu
@@ -56,8 +64,9 @@ Log out and back in before using the serial device.
 ## Configure automated publishing
 
 The `.github/workflows/release.yml` workflow builds Windows and Ubuntu on pushes
-to `main`, uploads both files to `latest/`, creates versioned files for `v*`
-tags, and invalidates `/latest/*` in CloudFront.
+to `main`, uploads both packages to `latest/`, creates versioned packages for
+`v*` tags, and invalidates `/latest/*` in CloudFront. The Windows package is a
+ZIP containing the application and both ESP32 Arduino sketches.
 
 Create these GitHub Actions repository secrets before running the workflow:
 

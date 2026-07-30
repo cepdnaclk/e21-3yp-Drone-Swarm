@@ -21,7 +21,7 @@ jobs:
         include:
           - platform: windows-x64
             runner: windows-latest
-            artifact: DroneSwarm-Windows-x64.exe
+            artifact: DroneSwarm-Windows-x64.zip
           - platform: ubuntu-x64
             runner: ubuntu-22.04
             artifact: DroneSwarm-Ubuntu-x64.tar.gz
@@ -87,10 +87,16 @@ jobs:
             -r -l dist_exe/DroneSwarm > archive-contents.txt
           grep -q "importlib.resources" archive-contents.txt
 
-      - name: Name Windows release
+      - name: Package Windows release
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item dist_exe/DroneSwarm.exe ${{ matrix.artifact }}
+        run: |
+          $bundleDir = "windows-release"
+          New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+          Copy-Item dist_exe/DroneSwarm.exe "$bundleDir/DroneSwarm.exe"
+          Copy-Item ../sender_esp32/sender_esp32.ino "$bundleDir/sender_esp32.ino"
+          Copy-Item ../receiver_esp32/receiver_drone1/receiver_drone1.ino "$bundleDir/receiver_drone1.ino"
+          Compress-Archive -Path "$bundleDir/*" -DestinationPath "${{ matrix.artifact }}" -Force
 
       - name: Package Ubuntu release
         if: runner.os == 'Linux'
@@ -124,7 +130,7 @@ jobs:
         shell: bash
         run: |
           cd release-assets
-          sha256sum DroneSwarm-Windows-x64.exe DroneSwarm-Ubuntu-x64.tar.gz > checksums.txt
+          sha256sum DroneSwarm-Windows-x64.zip DroneSwarm-Ubuntu-x64.tar.gz > checksums.txt
           cat > version.json <<EOF
           {
             "version": "${GITHUB_REF_NAME}",

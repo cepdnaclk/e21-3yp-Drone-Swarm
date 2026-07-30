@@ -26,7 +26,8 @@ Use a browser-based local application flow:
 
 Expected downloadable outputs:
 
-- Windows: `DroneSwarm-Windows-x64.exe`
+- Windows: `DroneSwarm-Windows-x64.zip` (contains `DroneSwarm.exe`,
+  `sender_esp32.ino`, and `receiver_drone1.ino`)
 - Ubuntu simple package: `DroneSwarm-Ubuntu-x64.tar.gz`
 - Optional Ubuntu desktop package: `DroneSwarm-Ubuntu-x64.AppImage`
 - Optional Ubuntu installer package: `DroneSwarm-Ubuntu-x64.deb`
@@ -201,13 +202,13 @@ Use one private or public S3 bucket for release artifacts:
 s3://drone-swarm-downloads/
   releases/
     v1.0.0/
-      DroneSwarm-Windows-x64.exe
+      DroneSwarm-Windows-x64.zip
       DroneSwarm-Ubuntu-x64.tar.gz
       DroneSwarm-Ubuntu-x64.AppImage
       DroneSwarm-Ubuntu-x64.deb
       checksums.txt
   latest/
-    DroneSwarm-Windows-x64.exe
+    DroneSwarm-Windows-x64.zip
     DroneSwarm-Ubuntu-x64.tar.gz
     DroneSwarm-Ubuntu-x64.AppImage
     DroneSwarm-Ubuntu-x64.deb
@@ -219,7 +220,7 @@ Put CloudFront in front of the S3 bucket.
 Example public download links:
 
 ```text
-https://downloads.example.com/latest/DroneSwarm-Windows-x64.exe
+https://downloads.example.com/latest/DroneSwarm-Windows-x64.zip
 https://downloads.example.com/latest/DroneSwarm-Ubuntu-x64.tar.gz
 https://downloads.example.com/latest/DroneSwarm-Ubuntu-x64.AppImage
 https://downloads.example.com/latest/DroneSwarm-Ubuntu-x64.deb

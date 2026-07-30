@@ -8,6 +8,7 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 API_DIR = Path(SPECPATH).resolve()
 PROJECT_DIR = API_DIR.parent
 FRONTEND_DIR = PROJECT_DIR / "dist"
+ICON_PATH = PROJECT_DIR / "logo.ico"
 
 if not (FRONTEND_DIR / "index.html").is_file():
     raise SystemExit(
@@ -65,4 +66,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(ICON_PATH),
 )

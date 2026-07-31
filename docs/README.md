@@ -29,24 +29,17 @@ title: Programmable Indoor ESP32 Drone Swarm Testbed
 7. [Links](#links)
 
 ## Introduction
-This project develops a low-cost programmable indoor drone swarm testbed using ESP32 mini drones to study real-world networking behavior and collision avoidance. The platform enables decentralized drone coordination, configurable communication conditions, and accurate indoor localization for controlled swarm experiments.
+This project develops a low-cost programmable indoor drone swarm testbed using mini drones to study real-world networking behavior and collision avoidance. The platform enables decentralized drone coordination, configurable communication conditions, and accurate indoor localization for controlled swarm experiments.
 
 ## Solution Architecture
-High-level system architecture includes multiple ESP32 drones communicating via ESP-NOW, UWB-based indoor localization, and a central hub for experiment configuration, safety monitoring, and data logging.
+High-level system architecture includes multiple drones communicating via ESP-NOW, 4-cam indoor localization, and a central hub for experiment configuration, safety monitoring, and data logging.
 
 ## Hardware and Software Designs
-Detailed hardware design of ESP32 drone platform, UWB localization modules, power systems, and onboard sensors, along with software modules for decentralized control, networking experiments, logging, and experiment configuration interfaces.
+Detailed hardware design of ESP32 drone platform, 4-cam localization modules, power systems, and onboard sensors, along with software modules for decentralized control, networking experiments, logging, and experiment configuration interfaces.
 
 ## Testing
 Experimental validation includes indoor flight testing, localization accuracy evaluation, packet loss and delay experiments, and collision avoidance performance measurements under different network conditions.
 
-## Detailed budget
-
-| Item | Quantity | Unit Cost | Total |
-|------|---------:|----------:|------:|
-| ESP32 drone modules | 10 | — | — |
-| UWB localization modules | 10 | — | — |
-| Batteries & chargers | — | — | — |
 
 ## Conclusion
 The project delivers an affordable indoor swarm research platform that enables real-world experimentation in distributed networking and collision avoidance, supporting future research, education, and advanced swarm algorithm development.

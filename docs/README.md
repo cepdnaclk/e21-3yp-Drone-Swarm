@@ -2,11 +2,11 @@
 layout: home
 permalink: index.html
 
-repository-name: e21-217-esp32-drone-swarm-testbed
-title: Programmable Indoor ESP32 Drone Swarm Testbed
+repository-name: e21-drone-swarm-testbed
+title: The Mocap
 ---
 
-# Programmable Indoor ESP32 Drone Swarm Testbed for Networking and Collision Avoidance
+# Programmable Indoor Drone Swarm Testbed
 
 ---
 

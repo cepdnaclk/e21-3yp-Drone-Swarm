@@ -1,0 +1,23 @@
+log("arm and takeoff test starting")
+log("state before", get_state())
+
+arm()
+log("armed")
+log("state after arm", get_state())
+
+target_altitude = 2.0
+log("takeoff starting", target_altitude)
+
+takeoff(target_altitude)
+log("takeoff command sent")
+
+while get_altitude() < target_altitude:
+    log("current altitude", get_altitude())
+    wait(1)
+
+log("target altitude reached")
+log("state after takeoff", get_state())
+
+wait(10)
+
+log("arm and takeoff test done")

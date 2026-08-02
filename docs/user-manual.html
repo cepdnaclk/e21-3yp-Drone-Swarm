@@ -478,6 +478,25 @@
       .hero-sub { font-size: 1rem; }
       .chip { min-height: 40px; }
       .page { padding: 40px 20px; }
+      .toc ul {
+        display: block;
+        padding-bottom: 0;
+        overflow-x: visible;
+      }
+      .toc li,
+      .toc li:last-child {
+        border-top: 1px solid var(--hairline);
+      }
+      .toc li:last-child { border-bottom: 1px solid var(--hairline); }
+      .toc a {
+        width: 100%;
+        min-height: 40px;
+        padding: 10px 12px;
+        border: 0;
+        border-left: 4px solid transparent;
+        border-radius: 0;
+        white-space: normal;
+      }
       .content section {
         margin-bottom: 56px;
         padding-top: 20px;
